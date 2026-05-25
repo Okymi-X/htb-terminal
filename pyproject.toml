@@ -1,0 +1,9 @@
+[project]
+name = "htb-terminal"
+version = "0.1.0"
+description = "Terminal client for selected Hack The Box Labs API workflows."
+requires-python = ">=3.10"
+
+[project.scripts]
+htb = "htb_terminal.cli:main"
+
