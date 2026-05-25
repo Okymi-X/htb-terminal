@@ -1,33 +1,33 @@
 # htb-terminal
 
-Client terminal Python pour quelques workflows courants de l'API HTB Labs v4:
-machines, VPN, fichiers OVPN et appels bruts.
+Python terminal client for selected HTB Labs v4 API workflows:
+machines, VPN, OVPN files, and raw API calls.
 
-## Sources utilisées
+## Sources
 
-- Documentation officielle HTB Enterprise Public API: https://enterprise-help.hackthebox.com/en/articles/13375637-introduction-to-enterprise-public-api
-- Article officiel HTB sur l'accès Lab/OpenVPN: https://help.hackthebox.com/en/articles/5185687-gs-introduction-to-lab-access
-- Collection Postman v4 fournie dans la demande: https://documenter.getpostman.com/view/13129365/TVeqbmeq
-- Référence communautaire lisible des endpoints Labs v4: https://github.com/D3vil0p3r/HackTheBox-API
+- Official HTB Enterprise Public API documentation: https://enterprise-help.hackthebox.com/en/articles/13375637-introduction-to-enterprise-public-api
+- Official HTB article on Lab/OpenVPN access: https://help.hackthebox.com/en/articles/5185687-gs-introduction-to-lab-access
+- v4 Postman collection provided in the request: https://documenter.getpostman.com/view/13129365/TVeqbmeq
+- Readable community reference for Labs v4 endpoints: https://github.com/D3vil0p3r/HackTheBox-API
 
-Note: HTB documente officiellement l'API Enterprise. Les endpoints Labs v4 utilisés ici viennent de la collection Postman et de références communautaires; ils peuvent changer sans préavis.
+Note: HTB officially documents the Enterprise API. The Labs v4 endpoints used here come from the Postman collection and community references; they may change without notice.
 
 ## Installation
 
-Le projet n'a pas de dépendance externe.
+This project has no external dependencies.
 
 ```bash
 chmod +x ./htb
 ./htb --help
 ```
 
-Par défaut, le token est lu depuis `api.token` dans le dossier courant. Tu peux aussi utiliser:
+By default, the token is read from `api.token` in the current directory. You can also use:
 
 ```bash
 export HTB_API_TOKEN="..."
 ```
 
-## Exemples
+## Examples
 
 ```bash
 ./htb machine active
@@ -54,11 +54,10 @@ export HTB_API_TOKEN="..."
 
 ## Architecture
 
-- `htb_terminal/config.py`: chargement du token et de l'URL API.
-- `htb_terminal/http.py`: client HTTP authentifie.
-- `htb_terminal/services/machines.py`: operations machines.
-- `htb_terminal/services/vpn.py`: operations VPN et OVPN.
-- `htb_terminal/cli.py`: parsing CLI et orchestration.
+- `htb_terminal/config.py`: loads the token and API URL.
+- `htb_terminal/http.py`: authenticated HTTP client.
+- `htb_terminal/services/machines.py`: machine operations.
+- `htb_terminal/services/vpn.py`: VPN and OVPN operations.
+- `htb_terminal/cli.py`: CLI parsing and orchestration.
 
-Chaque module garde une responsabilite unique pour faciliter les evolutions si HTB change un endpoint.
-
+Each module keeps a single responsibility to make future changes easier if HTB changes an endpoint.
