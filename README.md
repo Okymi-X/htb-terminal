@@ -55,6 +55,23 @@ export HTB_API_TOKEN="..."
 ./htb raw POST /vm/spawn --data '{"machine_id":478}'
 ```
 
+## Output
+
+By default, commands print human-readable output with terminal-width wrapping and automatic color when stdout is an interactive terminal.
+
+Use raw JSON for scripts:
+
+```bash
+./htb --json machine active
+```
+
+Color can be controlled globally:
+
+```bash
+./htb --color never machine active
+./htb --color always machine list
+```
+
 `machine active` enriches the active session response with the matching machine profile when a machine is active, but prints a compact summary by default. The summary includes useful profile-only text such as `info_status` and `description` when HTB returns it. Use `--details` for synopsis and Academy module names, or `--json` before the command for the full enriched response:
 
 ```bash

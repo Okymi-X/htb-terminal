@@ -9,7 +9,7 @@ from typing import Any
 
 from htb_terminal.config import ConfigError, load_config
 from htb_terminal.http import ApiError, HtbApiClient
-from htb_terminal.output import print_json, print_table
+from htb_terminal.output import print_json, print_pretty, print_table
 from htb_terminal.services.machines import MachineService, machine_rows
 from htb_terminal.services.vpn import VpnService, vpn_rows
 
@@ -43,6 +43,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--json", action="store_true", help="Print raw JSON responses.")
+    parser.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Colorize human output. Defaults to auto.",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
     _add_machine_commands(subparsers)
@@ -182,7 +188,11 @@ def _machine_list(args: argparse.Namespace, client: HtbApiClient) -> Any:
 
     if args.json:
         return payload
-    print_table(machine_rows(payload), ["id", "name", "os", "difficulty", "points", "active", "spawned", "free"])
+    print_table(
+        machine_rows(payload),
+        ["id", "name", "os", "difficulty", "points", "active", "spawned", "free"],
+        color=args.color,
+    )
     return None
 
 
@@ -200,7 +210,11 @@ def _machine_search(args: argparse.Namespace, client: HtbApiClient) -> Any:
     )
     if args.json:
         return rows
-    print_table(rows, ["id", "name", "os", "difficulty", "points", "retired", "active", "spawned", "free"])
+    print_table(
+        rows,
+        ["id", "name", "os", "difficulty", "points", "retired", "active", "spawned", "free"],
+        color=args.color,
+    )
     return None
 
 
@@ -225,7 +239,7 @@ def _vpn_servers(args: argparse.Namespace, client: HtbApiClient) -> Any:
     rows = vpn_rows(service.servers())
     if args.json:
         return rows
-    print_table(rows, ["alias", "id", "name", "scope", "location"])
+    print_table(rows, ["alias", "id", "name", "scope", "location"], color=args.color)
     return None
 
 
@@ -258,7 +272,10 @@ def _raw(args: argparse.Namespace, client: HtbApiClient) -> Any:
 
 def _print_result(value: Any, args: argparse.Namespace) -> None:
     if isinstance(value, (dict, list)):
-        print_json(value)
+        if args.json:
+            print_json(value)
+        else:
+            print_pretty(value, color=args.color)
     else:
         print(value)
 
