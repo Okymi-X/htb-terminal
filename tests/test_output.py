@@ -43,6 +43,34 @@ class OutputTests(unittest.TestCase):
         self.assertIn("\033[", output)
         self.assertIn("yes", output)
 
+    def test_table_truncates_long_cells_by_default(self) -> None:
+        stream = StringIO()
+
+        with redirect_stdout(stream):
+            print_table(
+                [{"id": 669, "name": "VeryLongMachineNameThatWouldBreakCompactTables"}],
+                ["id", "name"],
+                color="never",
+            )
+
+        output = stream.getvalue()
+        self.assertIn("VeryLongMachineNameThatWo...", output)
+        self.assertNotIn("VeryLongMachineNameThatWouldBreakCompactTables", output)
+
+    def test_table_wide_keeps_long_cells(self) -> None:
+        stream = StringIO()
+
+        with redirect_stdout(stream):
+            print_table(
+                [{"id": 669, "name": "VeryLongMachineNameThatWouldBreakCompactTables"}],
+                ["id", "name"],
+                color="never",
+                wide=True,
+            )
+
+        output = stream.getvalue()
+        self.assertIn("VeryLongMachineNameThatWouldBreakCompactTables", output)
+
 
 if __name__ == "__main__":
     unittest.main()

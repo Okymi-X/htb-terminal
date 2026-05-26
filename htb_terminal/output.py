@@ -36,23 +36,26 @@ def print_pretty(value: Any, color: str = "auto") -> None:
     print(_format_value(value, enabled))
 
 
-def print_table(rows: list[dict[str, Any]], columns: list[str], color: str = "auto") -> None:
+def print_table(
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    color: str = "auto",
+    *,
+    wide: bool = False,
+) -> None:
     enabled = _color_enabled(color)
     if not rows:
         print(_style("No rows.", "dim", enabled))
         return
 
-    widths = {
-        column: max(len(column), *(len(_format_cell(row.get(column))) for row in rows))
-        for column in columns
-    }
+    widths = _table_widths(rows, columns, wide=wide)
     print("  ".join(_style(column.ljust(widths[column]), "bold", enabled) for column in columns))
     print(_style("  ".join("-" * widths[column] for column in columns), "dim", enabled))
     for row in rows:
         cells = []
         for column in columns:
             raw = row.get(column)
-            text = _format_cell(raw).ljust(widths[column])
+            text = _truncate(_format_cell(raw), widths[column]).ljust(widths[column])
             cells.append(_format_cell_for_output(raw, text, enabled))
         print("  ".join(cells))
 
@@ -63,6 +66,65 @@ def _format_cell(value: Any) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     return str(value)
+
+
+def _table_widths(rows: list[dict[str, Any]], columns: list[str], *, wide: bool) -> dict[str, int]:
+    natural = {
+        column: max(len(column), *(len(_format_cell(row.get(column))) for row in rows))
+        for column in columns
+    }
+    if wide:
+        return natural
+
+    terminal_width = shutil.get_terminal_size((100, 24)).columns
+    separator_width = max(0, len(columns) - 1) * 2
+    available = max(len(columns), terminal_width - separator_width)
+    minimums = {column: min(max(len(column), 3), 8) for column in columns}
+    widths = {
+        column: min(natural[column], _preferred_column_width(column, terminal_width))
+        for column in columns
+    }
+
+    overflow = sum(widths.values()) - available
+    while overflow > 0:
+        candidates = [
+            column
+            for column in columns
+            if widths[column] > minimums[column] and widths[column] == max(widths.values())
+        ]
+        if not candidates:
+            break
+        column = candidates[0]
+        widths[column] -= 1
+        overflow -= 1
+
+    return widths
+
+
+def _preferred_column_width(column: str, terminal_width: int) -> int:
+    defaults = {
+        "id": 6,
+        "name": 28,
+        "alias": 18,
+        "os": 10,
+        "difficulty": 12,
+        "points": 8,
+        "active": 7,
+        "spawned": 7,
+        "free": 5,
+        "retired": 7,
+        "scope": 10,
+        "location": 10,
+    }
+    return min(defaults.get(column, 24), max(8, terminal_width // 3))
+
+
+def _truncate(text: str, width: int) -> str:
+    if len(text) <= width:
+        return text
+    if width <= 3:
+        return "." * width
+    return f"{text[: width - 3]}..."
 
 
 def _print_mapping(mapping: dict[str, Any], *, color: bool, width: int, indent: int = 0) -> None:

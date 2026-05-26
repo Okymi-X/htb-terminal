@@ -49,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="Colorize human output. Defaults to auto.",
     )
+    parser.add_argument("--wide", action="store_true", help="Do not truncate table columns.")
 
     subparsers = parser.add_subparsers(dest="command")
     _add_machine_commands(subparsers)
@@ -192,6 +193,7 @@ def _machine_list(args: argparse.Namespace, client: HtbApiClient) -> Any:
         machine_rows(payload),
         ["id", "name", "os", "difficulty", "points", "active", "spawned", "free"],
         color=args.color,
+        wide=args.wide,
     )
     return None
 
@@ -214,6 +216,7 @@ def _machine_search(args: argparse.Namespace, client: HtbApiClient) -> Any:
         rows,
         ["id", "name", "os", "difficulty", "points", "retired", "active", "spawned", "free"],
         color=args.color,
+        wide=args.wide,
     )
     return None
 
@@ -239,7 +242,7 @@ def _vpn_servers(args: argparse.Namespace, client: HtbApiClient) -> Any:
     rows = vpn_rows(service.servers())
     if args.json:
         return rows
-    print_table(rows, ["alias", "id", "name", "scope", "location"], color=args.color)
+    print_table(rows, ["alias", "id", "name", "scope", "location"], color=args.color, wide=args.wide)
     return None
 
 

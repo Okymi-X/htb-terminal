@@ -12,6 +12,16 @@ machines, VPN, OVPN files, and raw API calls.
 
 Note: HTB officially documents the Enterprise API. The Labs v4 endpoints used here come from the Postman collection and community references; they may change without notice.
 
+## Screenshots
+
+Compact active-machine output keeps the session details and profile-only status text readable without dumping the full HTB profile.
+
+![Active machine output](docs/screenshots/machine-active.png)
+
+Tables use compact columns, terminal colors, and truncation by default. Use `--wide` when you need full values.
+
+![VPN server table output](docs/screenshots/vpn-servers.png)
+
 ## Installation
 
 This project has no external dependencies.
@@ -70,6 +80,13 @@ Color can be controlled globally:
 ```bash
 ./htb --color never machine active
 ./htb --color always machine list
+```
+
+Tables are compact by default and truncate long cells to fit common terminal widths. Use `--wide` to keep full table values:
+
+```bash
+./htb --wide machine list
+./htb --wide machine search active-directory --all
 ```
 
 `machine active` enriches the active session response with the matching machine profile when a machine is active, but prints a compact summary by default. The summary includes useful profile-only text such as `info_status` and `description` when HTB returns it. Use `--details` for synopsis and Academy module names, or `--json` before the command for the full enriched response:
