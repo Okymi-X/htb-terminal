@@ -15,6 +15,60 @@ class MachineService:
     def active(self) -> Any:
         return self.client.get("/machine/active")
 
+    def active_with_profile(self) -> Any:
+        data = self.active()
+        info = data.get("info") if isinstance(data, dict) else None
+        if not isinstance(info, dict) or "id" not in info:
+            return data
+
+        try:
+            profile_info = self._profile_item(info)
+        except ApiError:
+            return data
+        if not profile_info:
+            return data
+
+        enriched = dict(data)
+        enriched["info"] = {**profile_info, **info}
+        return enriched
+
+    def active_summary(self, *, include_details: bool = False) -> Any:
+        data = self.active_with_profile()
+        info = data.get("info") if isinstance(data, dict) else None
+        if not isinstance(info, dict):
+            return data
+
+        play_info = info.get("playInfo")
+        if not isinstance(play_info, dict):
+            play_info = {}
+
+        summary = {
+            "info": {
+                "id": info.get("id"),
+                "name": info.get("name"),
+                "ip": info.get("ip"),
+                "os": info.get("os"),
+                "difficulty": info.get("difficultyText")
+                or info.get("difficulty_text")
+                or info.get("difficulty"),
+                "type": info.get("type"),
+                "retired": info.get("retired"),
+                "active": play_info.get("isActive", info.get("active")),
+                "spawned": play_info.get("isSpawned"),
+                "expires_at": info.get("expires_at") or play_info.get("expires_at"),
+                "vpn_server_id": info.get("vpn_server_id"),
+                "lab_server": info.get("lab_server"),
+                "info_status": info.get("info_status"),
+                "description": info.get("description")
+                or info.get("short_description")
+                or info.get("overview"),
+            }
+        }
+        if include_details:
+            summary["info"]["synopsis"] = info.get("synopsis")
+            summary["info"]["academy_modules"] = _academy_module_names(info.get("academy_modules"))
+        return summary
+
     def list_playable(self, page: int | None = None) -> Any:
         return self.client.get("/machine/paginated", query={"page": page})
 
@@ -29,6 +83,65 @@ class MachineService:
 
     def list_starting_point(self, tier: int) -> Any:
         return self.client.get(f"/sp/tier/{tier}")
+
+    def search(
+        self,
+        query: str,
+        *,
+        retired_only: bool = False,
+        include_retired: bool = False,
+        include_profiles: bool = False,
+        limit: int = 20,
+        max_pages: int = 10,
+    ) -> list[dict[str, Any]]:
+        term = query.strip()
+        if not term:
+            raise ValueError("Search query is required.")
+        if limit < 1:
+            raise ValueError("Search limit must be at least 1.")
+        if max_pages < 1:
+            raise ValueError("Search max pages must be at least 1.")
+
+        matches: list[tuple[int, dict[str, Any]]] = []
+        seen: set[int] = set()
+        for retired, loader in self._search_sources(retired_only, include_retired):
+            page_signatures: set[tuple[Any, ...]] = set()
+            for page in range(1, max_pages + 1):
+                payload = loader(page)
+                items = _extract_items(payload)
+                if not items:
+                    break
+                signature = _page_signature(items)
+                if signature in page_signatures:
+                    break
+                page_signatures.add(signature)
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    source_item = item
+                    rank = _machine_match_rank(source_item, term)
+                    if rank is None and include_profiles:
+                        profile_item = self._profile_item(source_item)
+                        if profile_item:
+                            source_item = {**source_item, **profile_item}
+                            rank = _machine_match_rank(source_item, term)
+                    if rank is None:
+                        continue
+                    row = machine_row(source_item)
+                    machine_id = row.get("id")
+                    if isinstance(machine_id, int):
+                        if machine_id in seen:
+                            continue
+                        seen.add(machine_id)
+                    row["retired"] = retired
+                    matches.append((rank, row))
+                if len(matches) >= limit or not _has_next_page(payload, page):
+                    break
+            if len(matches) >= limit:
+                break
+
+        matches.sort(key=lambda match: (match[0], str(match[1].get("name") or "").casefold()))
+        return [row for _, row in matches[:limit]]
 
     def start(self, target: str, mode: str) -> Any:
         machine_id = self.resolve_id(target)
@@ -87,6 +200,21 @@ class MachineService:
                 return self.spawn(machine_id)
             raise
 
+    def _search_sources(self, retired_only: bool, include_retired: bool) -> list[tuple[bool, Any]]:
+        if retired_only:
+            return [(True, self.list_retired)]
+        if include_retired:
+            return [(False, self.list_playable), (True, self.list_retired)]
+        return [(False, self.list_playable)]
+
+    def _profile_item(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        target = item.get("id") or item.get("name")
+        if target is None:
+            return None
+        data = self.profile(str(target))
+        info = data.get("info") if isinstance(data, dict) else None
+        return info if isinstance(info, dict) else None
+
 
 def machine_rows(payload: Any) -> list[dict[str, Any]]:
     items = _extract_items(payload)
@@ -94,19 +222,24 @@ def machine_rows(payload: Any) -> list[dict[str, Any]]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        rows.append(
-            {
-                "id": item.get("id"),
-                "name": item.get("name"),
-                "os": item.get("os"),
-                "difficulty": item.get("difficulty"),
-                "points": item.get("points") or item.get("static_points"),
-                "active": item.get("isActive"),
-                "spawned": item.get("isSpawned"),
-                "free": item.get("free"),
-            }
-        )
+        rows.append(machine_row(item))
     return rows
+
+
+def machine_row(item: dict[str, Any]) -> dict[str, Any]:
+    play_info = item.get("playInfo")
+    if not isinstance(play_info, dict):
+        play_info = {}
+    return {
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "os": item.get("os"),
+        "difficulty": item.get("difficultyText") or item.get("difficulty_text") or item.get("difficulty"),
+        "points": item.get("points") or item.get("static_points"),
+        "active": item.get("isActive") if item.get("isActive") is not None else play_info.get("isActive"),
+        "spawned": item.get("isSpawned") if item.get("isSpawned") is not None else play_info.get("isSpawned"),
+        "free": item.get("free"),
+    }
 
 
 def _extract_items(payload: Any) -> list[Any]:
@@ -123,3 +256,108 @@ def _extract_items(payload: Any) -> list[Any]:
             if isinstance(nested, list):
                 return nested
     return []
+
+
+def _has_next_page(payload: Any, current_page: int) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    links = payload.get("links")
+    if isinstance(links, dict) and "next" in links:
+        return bool(links.get("next"))
+
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        last_page = _to_int(meta.get("last_page"))
+        page = _to_int(meta.get("current_page")) or current_page
+        if last_page is not None:
+            return page < last_page
+
+    return bool(_extract_items(payload))
+
+
+def _page_signature(items: list[Any]) -> tuple[Any, ...]:
+    signature: list[Any] = []
+    for item in items:
+        if isinstance(item, dict):
+            signature.append(item.get("id", item.get("name")))
+        else:
+            signature.append(repr(item))
+    return tuple(signature)
+
+
+def _machine_match_rank(item: dict[str, Any], query: str) -> int | None:
+    term = query.casefold()
+    name = _text(item.get("name"))
+    if name == term:
+        return 0
+    if name.startswith(term):
+        return 1
+    if term in name:
+        return 2
+
+    exact_fields = [
+        item.get("id"),
+        item.get("os"),
+        item.get("difficultyText"),
+        item.get("difficulty_text"),
+        item.get("difficulty"),
+    ]
+    if any(_text(value) == term for value in exact_fields):
+        return 3
+
+    return 4 if any(term in value for value in _searchable_machine_values(item)) else None
+
+
+def _searchable_machine_values(item: dict[str, Any]) -> list[str]:
+    values = [
+        item.get("id"),
+        item.get("name"),
+        item.get("os"),
+        item.get("difficultyText"),
+        item.get("difficulty_text"),
+        item.get("difficulty"),
+        item.get("points"),
+        item.get("static_points"),
+        item.get("ip"),
+        item.get("description"),
+        item.get("short_description"),
+        item.get("description_html"),
+        item.get("overview"),
+    ]
+
+    for key in ("maker", "maker2"):
+        maker = item.get(key)
+        if isinstance(maker, dict):
+            values.append(maker.get("name"))
+
+    tags = item.get("tags")
+    if isinstance(tags, list):
+        for tag in tags:
+            if isinstance(tag, dict):
+                values.extend(tag.values())
+            else:
+                values.append(tag)
+
+    return [_text(value) for value in values if value is not None]
+
+
+def _academy_module_names(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    names: list[str] = []
+    for item in value:
+        if isinstance(item, dict) and item.get("name"):
+            names.append(str(item["name"]))
+    return names
+
+
+def _text(value: Any) -> str:
+    return str(value).casefold()
+
+
+def _to_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

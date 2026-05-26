@@ -35,6 +35,9 @@ export HTB_API_TOKEN="..."
 ./htb machine list
 ./htb machine list --retired --page 1
 ./htb machine list --sp-tier 1
+./htb machine search board
+./htb machine search kerberos --all --limit 10
+./htb machine search "breach creds" --all --profiles
 
 ./htb machine start "BoardLight" --mode auto
 ./htb machine start 444 --mode play
@@ -51,6 +54,33 @@ export HTB_API_TOKEN="..."
 ./htb raw GET /machine/active
 ./htb raw POST /vm/spawn --data '{"machine_id":478}'
 ```
+
+`machine active` enriches the active session response with the matching machine profile when a machine is active, but prints a compact summary by default. The summary includes useful profile-only text such as `info_status` and `description` when HTB returns it. Use `--details` for synopsis and Academy module names, or `--json` before the command for the full enriched response:
+
+```bash
+./htb machine active --details
+./htb --json machine active
+```
+
+## Machine search
+
+`machine search` intentionally uses the documented/listed Labs v4 machine list endpoints and filters the results locally. It does not depend on an undocumented search endpoint.
+
+By default it scans playable machines:
+
+```bash
+./htb machine search linux
+```
+
+Useful options:
+
+- `--retired`: search retired machines only.
+- `--all`: search playable and retired machines.
+- `--profiles`: also fetch each scanned machine profile and search profile-only fields such as descriptions.
+- `--limit N`: stop after printing up to `N` matches.
+- `--max-pages N`: cap the number of API pages scanned per list.
+
+Without `--profiles`, the query matches machine id, name, OS, difficulty, tags, maker names, and common list fields. Use `--profiles` for terms that may only exist in the detailed machine profile, for example description text mentioning breached credentials.
 
 ## Architecture
 

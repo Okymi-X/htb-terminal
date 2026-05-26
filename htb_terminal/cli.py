@@ -60,6 +60,7 @@ def _add_machine_commands(subparsers: argparse._SubParsersAction[argparse.Argume
     profile.set_defaults(handler=_machine_profile)
 
     active = machine_sub.add_parser("active", help="Show the active machine.")
+    active.add_argument("--details", action="store_true", help="Include synopsis and Academy module names.")
     active.set_defaults(handler=_machine_active)
 
     list_cmd = machine_sub.add_parser("list", help="List machines.")
@@ -69,6 +70,22 @@ def _add_machine_commands(subparsers: argparse._SubParsersAction[argparse.Argume
     list_cmd.add_argument("--unreleased", action="store_true")
     list_cmd.add_argument("--sp-tier", type=int, choices=[1, 2, 3], default=None)
     list_cmd.set_defaults(handler=_machine_list)
+
+    search = machine_sub.add_parser(
+        "search",
+        help="Search machines by id, name, OS, difficulty, tag, maker, or profile text.",
+    )
+    search.add_argument("query")
+    search.add_argument("--retired", action="store_true", help="Search retired machines only.")
+    search.add_argument("--all", action="store_true", help="Search playable and retired machines.")
+    search.add_argument(
+        "--profiles",
+        action="store_true",
+        help="Also fetch machine profiles and search description/profile-only fields.",
+    )
+    search.add_argument("--limit", type=int, default=20, help="Maximum matching rows to print.")
+    search.add_argument("--max-pages", type=int, default=10, help="Maximum API pages to scan per list.")
+    search.set_defaults(handler=_machine_search)
 
     start = machine_sub.add_parser("start", help="Start a machine by id or name.")
     start.add_argument("target")
@@ -141,7 +158,10 @@ def _machine_profile(args: argparse.Namespace, client: HtbApiClient) -> Any:
 
 
 def _machine_active(args: argparse.Namespace, client: HtbApiClient) -> Any:
-    return _machine_service(client).active()
+    service = _machine_service(client)
+    if args.json:
+        return service.active_with_profile()
+    return service.active_summary(include_details=args.details)
 
 
 def _machine_list(args: argparse.Namespace, client: HtbApiClient) -> Any:
@@ -163,6 +183,24 @@ def _machine_list(args: argparse.Namespace, client: HtbApiClient) -> Any:
     if args.json:
         return payload
     print_table(machine_rows(payload), ["id", "name", "os", "difficulty", "points", "active", "spawned", "free"])
+    return None
+
+
+def _machine_search(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    if args.retired and args.all:
+        raise ValueError("Choose either --retired or --all, not both.")
+
+    rows = _machine_service(client).search(
+        args.query,
+        retired_only=args.retired,
+        include_retired=args.all,
+        include_profiles=args.profiles,
+        limit=args.limit,
+        max_pages=args.max_pages,
+    )
+    if args.json:
+        return rows
+    print_table(rows, ["id", "name", "os", "difficulty", "points", "retired", "active", "spawned", "free"])
     return None
 
 
@@ -227,4 +265,3 @@ def _print_result(value: Any, args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
