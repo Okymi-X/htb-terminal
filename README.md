@@ -7,6 +7,9 @@
 Python terminal client for selected HTB Labs v4 API workflows:
 machines, VPN, OVPN files, and raw API calls. Zero external dependencies.
 
+See the [command reference](docs/commands.md) for every command, option,
+default, and the API endpoint each command calls.
+
 ## Sources
 
 - Official HTB Enterprise Public API documentation: https://enterprise-help.hackthebox.com/en/articles/13375637-introduction-to-enterprise-public-api
@@ -57,6 +60,8 @@ export HTB_API_TOKEN="..."
 `api.token` is gitignored; never commit your token.
 
 ## Examples
+
+Full details for each command are in the [command reference](docs/commands.md).
 
 ```bash
 ./htb machine active
