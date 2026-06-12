@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -30,10 +32,11 @@ class ApiResponse:
 
 
 class HtbApiClient:
-    def __init__(self, base_url: str, token: str, timeout: int = 30):
+    def __init__(self, base_url: str, token: str, timeout: int = 30, max_retries: int = 4):
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self.max_retries = max_retries
 
     def get(self, path: str, query: dict[str, Any] | None = None) -> Any:
         return self.request_json("GET", path, query=query)
@@ -74,20 +77,34 @@ class HtbApiClient:
 
         request = Request(url, data=payload, headers=headers, method=method.upper())
 
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                return ApiResponse(
-                    status=response.status,
-                    content_type=response.headers.get("Content-Type", ""),
-                    body=response.read(),
-                )
-        except HTTPError as exc:
-            body = exc.read()
-            parsed = _parse_error_body(body)
-            message = _error_message(exc.code, parsed, body)
-            raise ApiError(exc.code, message, parsed) from exc
-        except URLError as exc:
-            raise ApiError(None, f"Network error: {exc.reason}") from exc
+        backoff = 1.0
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urlopen(request, timeout=self.timeout) as response:
+                    return ApiResponse(
+                        status=response.status,
+                        content_type=response.headers.get("Content-Type", ""),
+                        body=response.read(),
+                    )
+            except HTTPError as exc:
+                if exc.code == 429 and attempt < self.max_retries:
+                    wait = _retry_after_seconds(exc.headers) or backoff
+                    print(
+                        f"warning: rate limited (HTTP 429), retrying in {wait:.0f}s"
+                        f" [{attempt + 1}/{self.max_retries}]",
+                        file=sys.stderr,
+                    )
+                    time.sleep(wait)
+                    backoff *= 2
+                    continue
+                body = exc.read()
+                parsed = _parse_error_body(body)
+                message = _error_message(exc.code, parsed, body)
+                raise ApiError(exc.code, message, parsed) from exc
+            except URLError as exc:
+                raise ApiError(None, f"Network error: {exc.reason}") from exc
+
+        raise ApiError(429, "HTTP 429: rate limit retries exhausted")
 
     def _url(self, path: str, query: dict[str, Any] | None = None) -> str:
         clean_path = path if path.startswith("/") else f"/{path}"
@@ -95,6 +112,16 @@ class HtbApiClient:
         if query:
             url = f"{url}?{urlencode({k: v for k, v in query.items() if v is not None})}"
         return url
+
+
+def _retry_after_seconds(headers: Any) -> float | None:
+    value = headers.get("Retry-After") if headers else None
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return None
 
 
 def _parse_error_body(body: bytes) -> Any | None:

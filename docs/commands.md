@@ -32,6 +32,14 @@ htb --color never --wide machine list
 | `HTB_API_TOKEN` | App Token. Overrides `--token-file`. `Authorization:` and `Bearer ` prefixes are stripped automatically. |
 | `HTB_API_BASE_URL` | API base URL. Overridden by `--base-url`. |
 
+### Rate limiting
+
+When the API answers HTTP 429, requests are retried automatically with
+exponential backoff (1s, 2s, 4s, 8s — up to 4 retries), honoring the
+`Retry-After` header when present. Each retry prints a warning to stderr.
+This mainly matters for `machine search --all --profiles`, which can scan
+many pages.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -288,6 +296,11 @@ htb vpn connect eu-free-1 -o lab-vpn.ovpn --openvpn-command "sudo openvpn"
 | `-o, --output PATH` | `lab-vpn.ovpn` | Where to write the OVPN file. |
 | `--variant N` | `0` | OVPN variant. |
 | `--openvpn-command CMD` | `sudo openvpn` | Command to run; `--config <file>` is appended. |
+
+OpenVPN needs root to create the tun interface. When not running as root,
+the command must be wrapped in `sudo`, `doas`, or `pkexec` (the default
+already uses `sudo`); otherwise `vpn connect` aborts with an error before
+switching servers.
 
 ---
 

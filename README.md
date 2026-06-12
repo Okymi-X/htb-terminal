@@ -152,7 +152,15 @@ Each module keeps a single responsibility to make future changes easier if HTB c
 
 ## Development
 
-Run the test suite with the standard library runner:
+Install the dev tools and run the test suite:
+
+```bash
+pip install -e ".[dev]"
+pytest
+ruff check .
+```
+
+The tests are also runnable with the standard library alone:
 
 ```bash
 python3 -m unittest discover -s tests -v

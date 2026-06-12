@@ -26,6 +26,9 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
 [project.urls]
 Homepage = "https://github.com/Okymi-X/htb-terminal"
 Repository = "https://github.com/Okymi-X/htb-terminal"
@@ -40,6 +43,9 @@ packages = ["htb_terminal", "htb_terminal.services"]
 
 [tool.setuptools.dynamic]
 version = { attr = "htb_terminal.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
