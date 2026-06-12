@@ -1,13 +1,17 @@
 # htb-terminal
 
+[![CI](https://github.com/Okymi-X/htb-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/Okymi-X/htb-terminal/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Python terminal client for selected HTB Labs v4 API workflows:
-machines, VPN, OVPN files, and raw API calls.
+machines, VPN, OVPN files, and raw API calls. Zero external dependencies.
 
 ## Sources
 
 - Official HTB Enterprise Public API documentation: https://enterprise-help.hackthebox.com/en/articles/13375637-introduction-to-enterprise-public-api
 - Official HTB article on Lab/OpenVPN access: https://help.hackthebox.com/en/articles/5185687-gs-introduction-to-lab-access
-- v4 Postman collection provided in the request: https://documenter.getpostman.com/view/13129365/TVeqbmeq
+- v4 Postman collection: https://documenter.getpostman.com/view/13129365/TVeqbmeq
 - Readable community reference for Labs v4 endpoints: https://github.com/D3vil0p3r/HackTheBox-API
 
 Note: HTB officially documents the Enterprise API. The Labs v4 endpoints used here come from the Postman collection and community references; they may change without notice.
@@ -24,18 +28,33 @@ Tables use compact columns, terminal colors, and truncation by default. Use `--w
 
 ## Installation
 
-This project has no external dependencies.
+Requires Python 3.10+. This project has no external dependencies.
+
+Run it directly from a clone:
 
 ```bash
 chmod +x ./htb
 ./htb --help
 ```
 
-By default, the token is read from `api.token` in the current directory. You can also use:
+Or install the `htb` command:
+
+```bash
+pip install .
+htb --help
+```
+
+### Authentication
+
+Generate an App Token from your HTB profile settings, then copy
+`api.token.example` to `api.token` and paste the token in. By default the
+token is read from `api.token` in the current directory. You can also use:
 
 ```bash
 export HTB_API_TOKEN="..."
 ```
+
+`api.token` is gitignored; never commit your token.
 
 ## Examples
 
@@ -125,3 +144,15 @@ Without `--profiles`, the query matches machine id, name, OS, difficulty, tags, 
 - `htb_terminal/cli.py`: CLI parsing and orchestration.
 
 Each module keeps a single responsibility to make future changes easier if HTB changes an endpoint.
+
+## Development
+
+Run the test suite with the standard library runner:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
