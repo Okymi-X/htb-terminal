@@ -4,6 +4,7 @@ lab-vpn.ovpn
 api.token
 .agents/
 .codex/
-.vscode/build/
+.vscode/
+build/
 dist/
 *.egg-info/
