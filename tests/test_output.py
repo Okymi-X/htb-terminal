@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from contextlib import redirect_stdout
 from io import StringIO
-import unittest
 
 from htb_terminal.output import print_pretty, print_table
 

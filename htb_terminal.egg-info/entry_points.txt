@@ -1,0 +1,2 @@
+[console_scripts]
+htb = htb_terminal.cli:main
