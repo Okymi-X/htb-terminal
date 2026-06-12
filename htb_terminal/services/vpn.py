@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,10 +56,25 @@ class VpnService:
         output: Path,
         openvpn_command: list[str],
     ) -> int:
+        ensure_openvpn_privileges(openvpn_command)
         self.switch(server)
         ovpn_path = self.download_ovpn(server, variant, output)
         command = [*openvpn_command, "--config", str(ovpn_path)]
         return subprocess.call(command)
+
+
+def ensure_openvpn_privileges(command: list[str]) -> None:
+    if not command:
+        raise RuntimeError("Empty OpenVPN command.")
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        return
+    if Path(command[0]).name in {"sudo", "doas", "pkexec"}:
+        return
+    raise RuntimeError(
+        "OpenVPN needs root privileges to create the tun interface. "
+        "Re-run as root, or keep the default --openvpn-command \"sudo openvpn\" "
+        "so the OpenVPN process is elevated."
+    )
 
 
 def resolve_server_id(value: str) -> int:
