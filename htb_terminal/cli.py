@@ -99,6 +99,26 @@ def _add_machine_commands(subparsers: argparse._SubParsersAction[argparse.Argume
     start = machine_sub.add_parser("start", help="Start a machine by id or name.")
     start.add_argument("target")
     start.add_argument("--mode", choices=["auto", "play", "spawn"], default="auto")
+    start.add_argument(
+        "--wait",
+        action="store_true",
+        help="Retry while spawn capacity is full, then wait for the machine IP."
+        " Useful at peak times such as seasonal releases (Saturdays 19:00 UTC).",
+    )
+    start.add_argument(
+        "--retry-for",
+        type=int,
+        default=600,
+        metavar="SECONDS",
+        help="With --wait: keep retrying the spawn for up to this long. Default 600.",
+    )
+    start.add_argument(
+        "--interval",
+        type=int,
+        default=15,
+        metavar="SECONDS",
+        help="With --wait: base delay between attempts (jittered). Default 15.",
+    )
     start.set_defaults(handler=_machine_start)
 
     stop = machine_sub.add_parser("stop", help="Stop a machine. Defaults to active machine.")
@@ -224,7 +244,24 @@ def _machine_search(args: argparse.Namespace, client: HtbApiClient) -> Any:
 
 
 def _machine_start(args: argparse.Namespace, client: HtbApiClient) -> Any:
-    return _machine_service(client).start(args.target, args.mode)
+    service = _machine_service(client)
+    if not args.wait:
+        return service.start(args.target, args.mode)
+
+    machine_id = service.resolve_id(args.target)
+    result = service.start_with_retry(
+        str(machine_id),
+        args.mode,
+        retry_for=args.retry_for,
+        interval=args.interval,
+    )
+    info = service.wait_for_active_ip(machine_id)
+    return {
+        "id": machine_id,
+        "name": info.get("name"),
+        "ip": info.get("ip"),
+        "spawn": result,
+    }
 
 
 def _machine_stop(args: argparse.Namespace, client: HtbApiClient) -> Any:

@@ -1,8 +1,23 @@
 from __future__ import annotations
 
+import random
+import sys
+import time
 from typing import Any
 
 from htb_terminal.http import ApiError, HtbApiClient
+
+TRANSIENT_SPAWN_STATUSES = {429, 500, 502, 503, 504}
+TRANSIENT_SPAWN_KEYWORDS = (
+    "full",
+    "busy",
+    "capacity",
+    "high load",
+    "too many",
+    "try again",
+    "later",
+    "wait",
+)
 
 
 class MachineService:
@@ -153,6 +168,67 @@ class MachineService:
             return self.spawn(machine_id)
         raise ValueError(f"Unsupported start mode: {mode}")
 
+    def start_with_retry(
+        self,
+        target: str,
+        mode: str,
+        *,
+        retry_for: int = 600,
+        interval: int = 15,
+    ) -> Any:
+        """Start a machine, retrying while spawn capacity is exhausted.
+
+        Meant for peak moments such as seasonal releases (Saturdays 19:00
+        UTC), when /vm/spawn rejects requests until a slot frees up.
+        """
+        machine_id = self.resolve_id(target)
+        deadline = time.monotonic() + retry_for
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return self.start(str(machine_id), mode)
+            except ApiError as exc:
+                if not _is_transient_spawn_error(exc):
+                    raise
+                # Jitter spreads retries out so simultaneous clients do not
+                # hammer the API in lockstep at the release moment.
+                wait = interval * random.uniform(0.8, 1.2)
+                if time.monotonic() + wait > deadline:
+                    raise ApiError(
+                        exc.status,
+                        f"Gave up after {attempt} attempts over {retry_for}s: {exc}",
+                        exc.body,
+                    ) from exc
+                print(
+                    f"warning: spawn rejected (attempt {attempt}): {exc};"
+                    f" retrying in {wait:.0f}s",
+                    file=sys.stderr,
+                )
+                time.sleep(wait)
+
+    def wait_for_active_ip(
+        self,
+        machine_id: int,
+        *,
+        timeout: int = 300,
+        interval: int = 10,
+    ) -> dict[str, Any]:
+        """Poll the active machine until it reports an IP address."""
+        deadline = time.monotonic() + timeout
+        while True:
+            data = self.active()
+            info = data.get("info") if isinstance(data, dict) else None
+            if info and _to_int(info.get("id")) == machine_id and info.get("ip"):
+                return info
+            if time.monotonic() + interval > deadline:
+                raise RuntimeError(
+                    f"Machine {machine_id} spawned but got no IP within {timeout}s."
+                    " Check 'htb machine active' in a moment."
+                )
+            print("waiting for machine IP...", file=sys.stderr)
+            time.sleep(interval)
+
     def play(self, machine_id: int) -> Any:
         return self.client.post(f"/machine/play/{machine_id}")
 
@@ -214,6 +290,13 @@ class MachineService:
         data = self.profile(str(target))
         info = data.get("info") if isinstance(data, dict) else None
         return info if isinstance(info, dict) else None
+
+
+def _is_transient_spawn_error(exc: ApiError) -> bool:
+    if exc.status in TRANSIENT_SPAWN_STATUSES:
+        return True
+    message = str(exc).lower()
+    return any(keyword in message for keyword in TRANSIENT_SPAWN_KEYWORDS)
 
 
 def machine_rows(payload: Any) -> list[dict[str, Any]]:

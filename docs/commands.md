@@ -153,12 +153,16 @@ Start (spawn) a machine by id or name.
 htb machine start BoardLight
 htb machine start 444 --mode play
 htb machine start 478 --mode spawn
+htb machine start Seasonal --wait
 ```
 
 | Argument / option | Default | Description |
 | --- | --- | --- |
 | `target` | — | Machine id or name. |
 | `--mode {auto,play,spawn}` | `auto` | Which start endpoint to use. |
+| `--wait` | off | Retry while spawn capacity is full, then wait for the machine IP. |
+| `--retry-for SECONDS` | `600` | With `--wait`: keep retrying the spawn for up to this long. |
+| `--interval SECONDS` | `15` | With `--wait`: base delay between attempts (jittered ±20%). |
 
 Modes:
 
@@ -166,6 +170,25 @@ Modes:
 - `spawn` — `POST /vm/spawn`, used for retired and VIP machines.
 - `auto` — tries `play` first and falls back to `spawn` when the API
   rejects it (HTTP 400, 404, 409, or 422).
+
+#### Peak times and seasonal releases
+
+When a seasonal machine drops (Saturdays 19:00 UTC), spawn capacity fills
+instantly and `/vm/spawn` rejects requests until slots free up; machines
+that do spawn can take a while to receive an IP. `--wait` handles both:
+
+- Capacity rejections (HTTP 429/500/502/503/504, or messages mentioning
+  full/busy/capacity/try-again) are retried for up to `--retry-for`
+  seconds, with a ±20% jitter on `--interval` so simultaneous clients do
+  not retry in lockstep. Non-transient errors (401, 404, ...) still fail
+  immediately.
+- After a successful spawn, the command polls the active machine until an
+  IP is assigned (up to 5 minutes), then prints the id, name, and IP.
+
+```bash
+# Fire this right at the release moment and walk away:
+htb machine start Seasonal --wait --retry-for 900
+```
 
 ### machine stop
 
