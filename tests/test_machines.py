@@ -4,7 +4,8 @@ import unittest
 from typing import Any
 
 from htb_terminal.http import ApiError
-from htb_terminal.services.machines import MachineService, machine_rows
+from htb_terminal.services.machines import MachineService
+from htb_terminal.services.payloads import machine_rows
 
 
 class FakeClient:

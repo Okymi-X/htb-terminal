@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import shlex
 import sys
@@ -8,10 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from htb_terminal import __version__
-from htb_terminal.config import ConfigError, load_config
+from htb_terminal.config import ConfigError, load_config, save_token
 from htb_terminal.http import ApiError, HtbApiClient
 from htb_terminal.output import print_json, print_pretty, print_table
-from htb_terminal.services.machines import MachineService, machine_rows
+from htb_terminal.services.machines import MachineService
+from htb_terminal.services.payloads import machine_rows
 from htb_terminal.services.vpn import VpnService, vpn_rows
 
 
@@ -24,8 +26,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        config = load_config(token_file=args.token_file, base_url=args.base_url)
-        client = HtbApiClient(config.base_url, config.token, timeout=args.timeout)
+        client = None
+        if getattr(args, "needs_auth", True):
+            config = load_config(token_file=args.token_file, base_url=args.base_url)
+            client = HtbApiClient(config.base_url, config.token, timeout=args.timeout)
         result = args.handler(args, client)
         if result is not None:
             _print_result(result, args)
@@ -41,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Terminal client for selected Hack The Box Labs API workflows.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("--token-file", type=Path, default=Path("api.token"))
+    parser.add_argument("--token-file", type=Path, default=None)
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--json", action="store_true", help="Print raw JSON responses.")
@@ -54,10 +58,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wide", action="store_true", help="Do not truncate table columns.")
 
     subparsers = parser.add_subparsers(dest="command")
+    _add_init_command(subparsers)
     _add_machine_commands(subparsers)
     _add_vpn_commands(subparsers)
     _add_raw_command(subparsers)
     return parser
+
+
+def _add_init_command(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    init = subparsers.add_parser(
+        "init",
+        help="Save your HTB App Token so future commands find it automatically.",
+    )
+    init.add_argument(
+        "--token",
+        default=None,
+        help="Token value. If omitted, you are prompted (input hidden) or it is read from stdin.",
+    )
+    init.set_defaults(handler=_init, needs_auth=False)
 
 
 def _add_machine_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -174,6 +192,27 @@ def _add_raw_command(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
     raw.set_defaults(handler=_raw)
 
 
+def _init(args: argparse.Namespace, client: HtbApiClient | None) -> Any:
+    token = args.token or _prompt_token()
+    path = save_token(token, args.token_file)
+    return {"saved": str(path)}
+
+
+def _prompt_token() -> str:
+    if not sys.stdin.isatty():
+        piped = sys.stdin.read().strip()
+        if piped:
+            return piped
+        raise ValueError("No token provided on stdin.")
+    try:
+        entered = getpass.getpass("Paste your HTB App Token (input hidden): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise ValueError("Token entry cancelled.") from None
+    if not entered:
+        raise ValueError("No token entered.")
+    return entered
+
+
 def _machine_service(client: HtbApiClient) -> MachineService:
     return MachineService(client)
 
@@ -277,8 +316,7 @@ def _machine_submit(args: argparse.Namespace, client: HtbApiClient) -> Any:
 
 
 def _vpn_servers(args: argparse.Namespace, client: HtbApiClient) -> Any:
-    service = _vpn_service(client)
-    rows = vpn_rows(service.servers())
+    rows = vpn_rows()
     if args.json:
         return rows
     print_table(rows, ["alias", "id", "name", "scope", "location"], color=args.color, wide=args.wide)

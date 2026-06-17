@@ -33,29 +33,56 @@ Tables use compact columns, terminal colors, and truncation by default. Use `--w
 
 Requires Python 3.10+. This project has no external dependencies.
 
-Run it directly from a clone:
+Install as a global command with [pipx](https://pipx.pypa.io) (recommended) so
+`htb` is available from any directory:
+
+```bash
+pipx install htbx
+htb --help
+```
+
+Or with pip:
+
+```bash
+pip install htbx
+htb --help
+```
+
+The package is published on PyPI as **`htbx`**; it installs the `htb` command
+(an `htbx` alias is installed too). To run the latest from source without
+installing, use a clone:
 
 ```bash
 chmod +x ./htb
 ./htb --help
 ```
 
-Or install the `htb` command:
-
-```bash
-pip install .
-htb --help
-```
-
 ### Authentication
 
-Generate an App Token from your HTB profile settings, then copy
-`api.token.example` to `api.token` and paste the token in. By default the
-token is read from `api.token` in the current directory. You can also use:
+Generate an App Token from your HTB profile settings, then save it once with
+`init`:
 
 ```bash
-export HTB_API_TOKEN="..."
+htb init
+# Paste your HTB App Token (input hidden): ...
 ```
+
+`init` stores the token in your user config directory
+(`~/.config/htb-terminal/token`, or `$XDG_CONFIG_HOME/htb-terminal/token`) with
+owner-only permissions, so a pipx-installed `htb` finds it from anywhere. You
+can also pass it non-interactively:
+
+```bash
+htb init --token "$MY_TOKEN"
+echo "$MY_TOKEN" | htb init
+```
+
+The token is resolved in this order, first match wins:
+
+1. `HTB_API_TOKEN` environment variable.
+2. `--token-file PATH`, when given.
+3. `./api.token` in the current directory (handy as a per-project override).
+4. The user config file written by `htb init`.
 
 `api.token` is gitignored; never commit your token.
 
@@ -144,11 +171,18 @@ Without `--profiles`, the query matches machine id, name, OS, difficulty, tags, 
 
 - `htb_terminal/config.py`: loads the token and API URL.
 - `htb_terminal/http.py`: authenticated HTTP client.
-- `htb_terminal/services/machines.py`: machine operations.
+- `htb_terminal/output.py`: human-readable and JSON rendering.
+- `htb_terminal/services/machines.py`: `MachineService` — machine API operations.
+- `htb_terminal/services/payloads.py`: pure helpers that reshape machine-list JSON.
+- `htb_terminal/services/search.py`: local machine search and result ranking.
+- `htb_terminal/services/spawn.py`: transient spawn-failure detection.
 - `htb_terminal/services/vpn.py`: VPN and OVPN operations.
 - `htb_terminal/cli.py`: CLI parsing and orchestration.
 
-Each module keeps a single responsibility to make future changes easier if HTB changes an endpoint.
+Each module keeps a single responsibility to make future changes easier if HTB
+changes an endpoint. `MachineService` only talks to the API; payload reshaping,
+search ranking, and spawn-error detection are stateless modules it composes, so
+they are testable in isolation and stay small.
 
 ## Development
 

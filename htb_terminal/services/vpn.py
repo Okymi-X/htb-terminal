@@ -35,9 +35,6 @@ class VpnService:
     def __init__(self, client: HtbApiClient):
         self.client = client
 
-    def servers(self) -> list[VpnServer]:
-        return list(KNOWN_VPN_SERVERS.values())
-
     def switch(self, server: str) -> Any:
         server_id = resolve_server_id(server)
         return self.client.post(f"/connections/servers/switch/{server_id}")
@@ -87,7 +84,7 @@ def resolve_server_id(value: str) -> int:
     raise RuntimeError(f"Unknown VPN server {value!r}. Known aliases: {known}")
 
 
-def vpn_rows(servers: list[VpnServer]) -> list[dict[str, Any]]:
+def vpn_rows() -> list[dict[str, Any]]:
     return [
         {
             "alias": alias,

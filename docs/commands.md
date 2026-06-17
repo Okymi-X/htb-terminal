@@ -18,7 +18,7 @@ htb --color never --wide machine list
 | Option | Default | Description |
 | --- | --- | --- |
 | `--version` | — | Print `htb <version>` and exit. |
-| `--token-file PATH` | `api.token` | File to read the App Token from. `HTB_API_TOKEN` takes precedence when set. |
+| `--token-file PATH` | auto | File to read the App Token from. When unset, `htb` looks at `./api.token` then the user config file written by `htb init`. `HTB_API_TOKEN` takes precedence over all of these. |
 | `--base-url URL` | `https://labs.hackthebox.com/api/v4` | Override the API base URL. Also settable via `HTB_API_BASE_URL`. |
 | `--timeout SECONDS` | `30` | HTTP request timeout. |
 | `--json` | off | Print raw JSON responses instead of human-readable output. |
@@ -53,6 +53,31 @@ many pages.
 Wherever a command takes a machine target, you can pass either a numeric id
 (`444`) or a machine name (`BoardLight`). Names are resolved through
 `/machine/profile/<name>`.
+
+---
+
+## init
+
+Save your HTB App Token so future commands find it automatically. This is the
+easiest way to authenticate, especially for a global `pipx install`.
+
+```bash
+htb init
+htb init --token "$MY_TOKEN"
+echo "$MY_TOKEN" | htb init
+```
+
+| Option | Description |
+| --- | --- |
+| `--token VALUE` | Token value. If omitted, you are prompted (input hidden), or it is read from stdin when piped. |
+
+The token is written to the user config file
+(`~/.config/htb-terminal/token`, or `$XDG_CONFIG_HOME/htb-terminal/token`) with
+owner-only permissions. Pass the global `--token-file PATH` before `init` to
+save it somewhere else, for example `htb --token-file ./api.token init`.
+
+`init` makes no network calls and does not require an existing token. `Bearer`
+and `Authorization:` prefixes are stripped automatically before saving.
 
 ---
 
