@@ -65,6 +65,8 @@ Generate an App Token from your HTB profile settings, then save it once with
 ```bash
 htb init
 # Paste your HTB App Token (input hidden): ...
+
+htb init --check   # also verify the token and print who you are
 ```
 
 `init` stores the token in your user config directory
@@ -105,7 +107,11 @@ Full details for each command are in the [command reference](docs/commands.md).
 ./htb machine start 478 --mode spawn
 ./htb machine stop
 ./htb machine reset
+./htb machine extend
 ./htb machine submit 444 HTB{flag} --difficulty 50
+./htb machine active --oneline
+
+./htb user info
 
 ./htb vpn servers
 ./htb vpn switch us-free-1
@@ -167,12 +173,28 @@ Useful options:
 
 Without `--profiles`, the query matches machine id, name, OS, difficulty, tags, maker names, and common list fields. Use `--profiles` for terms that may only exist in the detailed machine profile, for example description text mentioning breached credentials.
 
+## Shell completion
+
+Enable tab-completion for commands, subcommands, and options. The same script
+works for both the `htb` and `htbx` commands.
+
+```bash
+# bash — add to ~/.bashrc:
+eval "$(htb completion bash)"
+
+# zsh — add to ~/.zshrc (before compinit, or save to a file on your $fpath):
+eval "$(htb completion zsh)"
+```
+
 ## Architecture
 
-- `htb_terminal/config.py`: loads the token and API URL.
+- `htb_terminal/config.py`: loads/saves the token and API URL.
 - `htb_terminal/http.py`: authenticated HTTP client.
 - `htb_terminal/output.py`: human-readable and JSON rendering.
+- `htb_terminal/timefmt.py`: relative time formatting for display.
+- `htb_terminal/completion.py`: bash/zsh completion scripts from one command map.
 - `htb_terminal/services/machines.py`: `MachineService` — machine API operations.
+- `htb_terminal/services/user.py`: `UserService` — current-user profile.
 - `htb_terminal/services/payloads.py`: pure helpers that reshape machine-list JSON.
 - `htb_terminal/services/search.py`: local machine search and result ranking.
 - `htb_terminal/services/spawn.py`: transient spawn-failure detection.

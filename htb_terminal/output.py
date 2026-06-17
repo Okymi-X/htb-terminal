@@ -59,6 +59,29 @@ def print_table(
         print("  ".join(cells))
 
 
+def print_status_line(info: dict[str, Any], color: str = "auto") -> None:
+    """Print a compact one-line summary of the active machine."""
+    enabled = _color_enabled(color)
+    name = info.get("name")
+    if not name:
+        print(_style("No active machine.", "dim", enabled))
+        return
+
+    parts = [_style("ACTIVE", "green", enabled), _style(str(name), "bold", enabled)]
+    if info.get("ip"):
+        parts.append(str(info["ip"]))
+    os_diff = "/".join(str(value) for value in (info.get("os"), info.get("difficulty")) if value)
+    if os_diff:
+        parts.append(os_diff)
+    expires = info.get("expires_in")
+    if expires:
+        label = expires if expires == "expired" else f"expires {expires}"
+        parts.append(_style(label, "yellow", enabled))
+    if info.get("spawned"):
+        parts.append(_style("[spawned]", "cyan", enabled))
+    print("  ".join(parts))
+
+
 def _format_cell(value: Any) -> str:
     if value is None:
         return ""

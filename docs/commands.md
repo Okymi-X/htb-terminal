@@ -70,6 +70,7 @@ echo "$MY_TOKEN" | htb init
 | Option | Description |
 | --- | --- |
 | `--token VALUE` | Token value. If omitted, you are prompted (input hidden), or it is read from stdin when piped. |
+| `--check` | After saving, verify the token against `GET /user/info` and print your username. |
 
 The token is written to the user config file
 (`~/.config/htb-terminal/token`, or `$XDG_CONFIG_HOME/htb-terminal/token`) with
@@ -98,6 +99,16 @@ htb machine profile 444
 
 Endpoint: `GET /machine/profile/{target}`
 
+### machine info
+
+Alias for `machine profile`.
+
+```bash
+htb machine info BoardLight
+```
+
+Endpoint: `GET /machine/profile/{target}`
+
 ### machine active
 
 Show the active machine. The session response is enriched with the matching
@@ -113,6 +124,10 @@ htb --json machine active
 | Option | Description |
 | --- | --- |
 | `--details` | Also include the synopsis and Academy module names. |
+| `--oneline` | Print a single compact status line, e.g. `ACTIVE  BoardLight  10.10.11.11  Linux/Easy  expires in 47m  [spawned]`. |
+
+The summary includes `expires_in`, a relative expiry such as `in 47m` derived
+from the machine's expiry timestamp.
 
 With the global `--json` flag, the full enriched response is printed instead
 of the summary.
@@ -245,6 +260,22 @@ htb machine reset 444
 
 Endpoint: `POST /vm/reset`
 
+### machine extend
+
+Extend a machine's expiry, buying more time before it is reaped. Without a
+target, extends the currently active machine.
+
+```bash
+htb machine extend
+htb machine extend BoardLight
+```
+
+| Argument | Description |
+| --- | --- |
+| `target` | Optional machine id or name. Defaults to the active machine. |
+
+Endpoint: `POST /vm/extend`
+
 ### machine submit
 
 Submit a user or root flag. HTB infers user versus root from the flag itself.
@@ -349,6 +380,42 @@ OpenVPN needs root to create the tun interface. When not running as root,
 the command must be wrapped in `sudo`, `doas`, or `pkexec` (the default
 already uses `sudo`); otherwise `vpn connect` aborts with an error before
 switching servers.
+
+---
+
+## user
+
+### user info
+
+Show your own HTB profile: rank, points, and owns. Resolves your user id from
+`GET /user/info`, then fetches the basic profile.
+
+```bash
+htb user info
+htb --json user info
+```
+
+With the global `--json` flag, the full basic profile is printed instead of the
+summary.
+
+Endpoints: `GET /user/info`, `GET /user/profile/basic/{id}`
+
+---
+
+## completion
+
+Print a shell completion script for `htb` and `htbx`.
+
+```bash
+eval "$(htb completion bash)"   # bash
+eval "$(htb completion zsh)"    # zsh
+```
+
+| Argument | Description |
+| --- | --- |
+| `shell` | One of `bash`, `zsh`. |
+
+This command makes no network calls and needs no token.
 
 ---
 
