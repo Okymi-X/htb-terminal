@@ -19,6 +19,16 @@ STYLES = {
 }
 
 
+def color_enabled(mode: str = "auto") -> bool:
+    """Public wrapper: should colored output be emitted for this mode?"""
+    return _color_enabled(mode)
+
+
+def style(text: str, name: str, enabled: bool) -> str:
+    """Public wrapper: wrap text in an ANSI style when enabled."""
+    return _style(text, name, enabled)
+
+
 def print_json(value: Any) -> None:
     print(json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True))
 
