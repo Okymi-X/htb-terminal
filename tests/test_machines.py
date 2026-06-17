@@ -21,6 +21,13 @@ class FakeClient:
             raise value
         return value
 
+    def post(self, path: str, data: dict[str, Any] | None = None) -> Any:
+        self.calls.append((path, None))
+        value = self.pages[path][None]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
 
 class MachineSearchTests(unittest.TestCase):
     def test_active_with_profile_adds_description_and_keeps_session_ip(self) -> None:
@@ -266,6 +273,33 @@ class MachineSearchTests(unittest.TestCase):
 
         self.assertEqual([], rows)
         self.assertEqual([("/machine/paginated", 1)], client.calls)
+
+    def test_extend_targets_active_machine_by_default(self) -> None:
+        client = FakeClient(
+            {
+                "/machine/active": {None: {"info": {"id": 42, "name": "X"}}},
+                "/vm/extend": {None: {"message": "Extended"}},
+            }
+        )
+
+        result = MachineService(client).extend()
+
+        self.assertEqual({"message": "Extended"}, result)
+        self.assertIn(("/vm/extend", None), client.calls)
+
+    def test_active_summary_includes_relative_expiry(self) -> None:
+        client = FakeClient(
+            {
+                "/machine/active": {
+                    None: {"info": {"id": 1, "name": "X", "expires_at": "2020-01-01T00:00:00Z"}},
+                },
+                "/machine/profile/1": {None: {"info": {"id": 1, "name": "X"}}},
+            }
+        )
+
+        payload = MachineService(client).active_summary()
+
+        self.assertEqual("expired", payload["info"]["expires_in"])
 
     def test_machine_rows_reads_play_info_state(self) -> None:
         rows = machine_rows(

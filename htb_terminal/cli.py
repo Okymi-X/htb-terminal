@@ -9,11 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from htb_terminal import __version__
+from htb_terminal.completion import completion_script
 from htb_terminal.config import ConfigError, load_config, save_token
 from htb_terminal.http import ApiError, HtbApiClient
-from htb_terminal.output import print_json, print_pretty, print_table
+from htb_terminal.output import print_json, print_pretty, print_status_line, print_table
 from htb_terminal.services.machines import MachineService
 from htb_terminal.services.payloads import machine_rows
+from htb_terminal.services.user import UserService
 from htb_terminal.services.vpn import VpnService, vpn_rows
 
 
@@ -36,6 +38,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except (ApiError, ConfigError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        if isinstance(exc, ApiError) and exc.status in (401, 403):
+            print(
+                "hint: the App Token was rejected. Run 'htb init' to set a valid one,"
+                " or check HTB_API_TOKEN.",
+                file=sys.stderr,
+            )
         return 1
 
 
@@ -61,7 +69,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_init_command(subparsers)
     _add_machine_commands(subparsers)
     _add_vpn_commands(subparsers)
+    _add_user_commands(subparsers)
     _add_raw_command(subparsers)
+    _add_completion_command(subparsers)
     return parser
 
 
@@ -75,6 +85,11 @@ def _add_init_command(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
         default=None,
         help="Token value. If omitted, you are prompted (input hidden) or it is read from stdin.",
     )
+    init.add_argument(
+        "--check",
+        action="store_true",
+        help="After saving, verify the token against the API and print who you are.",
+    )
     init.set_defaults(handler=_init, needs_auth=False)
 
 
@@ -86,8 +101,17 @@ def _add_machine_commands(subparsers: argparse._SubParsersAction[argparse.Argume
     profile.add_argument("target")
     profile.set_defaults(handler=_machine_profile)
 
+    info = machine_sub.add_parser("info", help="Alias for 'machine profile'.")
+    info.add_argument("target")
+    info.set_defaults(handler=_machine_profile)
+
     active = machine_sub.add_parser("active", help="Show the active machine.")
     active.add_argument("--details", action="store_true", help="Include synopsis and Academy module names.")
+    active.add_argument(
+        "--oneline",
+        action="store_true",
+        help="Print a single compact status line instead of the full summary.",
+    )
     active.set_defaults(handler=_machine_active)
 
     list_cmd = machine_sub.add_parser("list", help="List machines.")
@@ -147,6 +171,10 @@ def _add_machine_commands(subparsers: argparse._SubParsersAction[argparse.Argume
     reset.add_argument("target", nargs="?")
     reset.set_defaults(handler=_machine_reset)
 
+    extend = machine_sub.add_parser("extend", help="Extend a machine's expiry. Defaults to active machine.")
+    extend.add_argument("target", nargs="?")
+    extend.set_defaults(handler=_machine_extend)
+
     submit = machine_sub.add_parser("submit", help="Submit a user or root flag.")
     submit.add_argument("target")
     submit.add_argument("flag")
@@ -183,6 +211,23 @@ def _add_vpn_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
     connect.set_defaults(handler=_vpn_connect)
 
 
+def _add_user_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    user = subparsers.add_parser("user", help="Show your HTB user profile.")
+    user_sub = user.add_subparsers(dest="user_command")
+
+    info = user_sub.add_parser("info", help="Show your profile: rank, points, and owns.")
+    info.set_defaults(handler=_user_info)
+
+
+def _add_completion_command(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    completion = subparsers.add_parser(
+        "completion",
+        help="Print a shell completion script. Eval or source the output.",
+    )
+    completion.add_argument("shell", choices=["bash", "zsh"])
+    completion.set_defaults(handler=_completion, needs_auth=False)
+
+
 def _add_raw_command(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     raw = subparsers.add_parser("raw", help="Call an API endpoint directly.")
     raw.add_argument("method", choices=["GET", "POST", "PUT", "PATCH", "DELETE"])
@@ -195,7 +240,12 @@ def _add_raw_command(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
 def _init(args: argparse.Namespace, client: HtbApiClient | None) -> Any:
     token = args.token or _prompt_token()
     path = save_token(token, args.token_file)
-    return {"saved": str(path)}
+    result: dict[str, Any] = {"saved": str(path)}
+    if args.check:
+        config = load_config(token_file=path, base_url=args.base_url)
+        verify_client = HtbApiClient(config.base_url, config.token, timeout=args.timeout)
+        result["verified_as"] = UserService(verify_client).whoami().get("name")
+    return result
 
 
 def _prompt_token() -> str:
@@ -229,7 +279,12 @@ def _machine_active(args: argparse.Namespace, client: HtbApiClient) -> Any:
     service = _machine_service(client)
     if args.json:
         return service.active_with_profile()
-    return service.active_summary(include_details=args.details)
+    summary = service.active_summary(include_details=args.details)
+    if args.oneline:
+        info = summary.get("info") if isinstance(summary, dict) else None
+        print_status_line(info if isinstance(info, dict) else {}, color=args.color)
+        return None
+    return summary
 
 
 def _machine_list(args: argparse.Namespace, client: HtbApiClient) -> Any:
@@ -311,6 +366,10 @@ def _machine_reset(args: argparse.Namespace, client: HtbApiClient) -> Any:
     return _machine_service(client).reset(args.target)
 
 
+def _machine_extend(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    return _machine_service(client).extend(args.target)
+
+
 def _machine_submit(args: argparse.Namespace, client: HtbApiClient) -> Any:
     return _machine_service(client).submit_flag(args.target, args.flag, args.difficulty)
 
@@ -336,6 +395,18 @@ def _vpn_connect(args: argparse.Namespace, client: HtbApiClient) -> Any:
     command = shlex.split(args.openvpn_command)
     code = _vpn_service(client).connect(args.server, args.variant, args.output, command)
     return {"exit_code": code}
+
+
+def _user_info(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    service = UserService(client)
+    if args.json:
+        return service.profile()
+    return service.summary()
+
+
+def _completion(args: argparse.Namespace, client: HtbApiClient | None) -> Any:
+    print(completion_script(args.shell))
+    return None
 
 
 def _raw(args: argparse.Namespace, client: HtbApiClient) -> Any:

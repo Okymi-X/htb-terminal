@@ -17,6 +17,7 @@ from htb_terminal.http import ApiError, HtbApiClient
 from htb_terminal.services.payloads import academy_module_names, to_int
 from htb_terminal.services.search import SearchSource, search_machines
 from htb_terminal.services.spawn import is_transient_spawn_error
+from htb_terminal.timefmt import relative_expiry
 
 
 class MachineService:
@@ -70,6 +71,7 @@ class MachineService:
                 "active": play_info.get("isActive", info.get("active")),
                 "spawned": play_info.get("isSpawned"),
                 "expires_at": info.get("expires_at") or play_info.get("expires_at"),
+                "expires_in": relative_expiry(info.get("expires_at") or play_info.get("expires_at")),
                 "vpn_server_id": info.get("vpn_server_id"),
                 "lab_server": info.get("lab_server"),
                 "info_status": info.get("info_status"),
@@ -209,6 +211,10 @@ class MachineService:
     def reset(self, target: str | None = None) -> Any:
         machine_id = self.resolve_id(target) if target else self.active_id()
         return self.client.post("/vm/reset", data={"machine_id": machine_id})
+
+    def extend(self, target: str | None = None) -> Any:
+        machine_id = self.resolve_id(target) if target else self.active_id()
+        return self.client.post("/vm/extend", data={"machine_id": machine_id})
 
     def submit_flag(self, target: str, flag: str, difficulty: int) -> Any:
         return self.client.post(
