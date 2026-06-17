@@ -1,3 +1,11 @@
+"""Machine API operations.
+
+``MachineService`` is the single entry point for machine workflows. Payload
+reshaping lives in :mod:`htb_terminal.services.payloads`, search ranking in
+:mod:`htb_terminal.services.search`, and spawn-error detection in
+:mod:`htb_terminal.services.spawn`.
+"""
+
 from __future__ import annotations
 
 import random
@@ -6,18 +14,9 @@ import time
 from typing import Any
 
 from htb_terminal.http import ApiError, HtbApiClient
-
-TRANSIENT_SPAWN_STATUSES = {429, 500, 502, 503, 504}
-TRANSIENT_SPAWN_KEYWORDS = (
-    "full",
-    "busy",
-    "capacity",
-    "high load",
-    "too many",
-    "try again",
-    "later",
-    "wait",
-)
+from htb_terminal.services.payloads import academy_module_names, to_int
+from htb_terminal.services.search import SearchSource, search_machines
+from htb_terminal.services.spawn import is_transient_spawn_error
 
 
 class MachineService:
@@ -81,7 +80,7 @@ class MachineService:
         }
         if include_details:
             summary["info"]["synopsis"] = info.get("synopsis")
-            summary["info"]["academy_modules"] = _academy_module_names(info.get("academy_modules"))
+            summary["info"]["academy_modules"] = academy_module_names(info.get("academy_modules"))
         return summary
 
     def list_playable(self, page: int | None = None) -> Any:
@@ -117,46 +116,14 @@ class MachineService:
         if max_pages < 1:
             raise ValueError("Search max pages must be at least 1.")
 
-        matches: list[tuple[int, dict[str, Any]]] = []
-        seen: set[int] = set()
-        for retired, loader in self._search_sources(retired_only, include_retired):
-            page_signatures: set[tuple[Any, ...]] = set()
-            for page in range(1, max_pages + 1):
-                payload = loader(page)
-                items = _extract_items(payload)
-                if not items:
-                    break
-                signature = _page_signature(items)
-                if signature in page_signatures:
-                    break
-                page_signatures.add(signature)
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    source_item = item
-                    rank = _machine_match_rank(source_item, term)
-                    if rank is None and include_profiles:
-                        profile_item = self._profile_item(source_item)
-                        if profile_item:
-                            source_item = {**source_item, **profile_item}
-                            rank = _machine_match_rank(source_item, term)
-                    if rank is None:
-                        continue
-                    row = machine_row(source_item)
-                    machine_id = row.get("id")
-                    if isinstance(machine_id, int):
-                        if machine_id in seen:
-                            continue
-                        seen.add(machine_id)
-                    row["retired"] = retired
-                    matches.append((rank, row))
-                if len(matches) >= limit or not _has_next_page(payload, page):
-                    break
-            if len(matches) >= limit:
-                break
-
-        matches.sort(key=lambda match: (match[0], str(match[1].get("name") or "").casefold()))
-        return [row for _, row in matches[:limit]]
+        return search_machines(
+            self._search_sources(retired_only, include_retired),
+            term,
+            profile_resolver=self._profile_item,
+            include_profiles=include_profiles,
+            limit=limit,
+            max_pages=max_pages,
+        )
 
     def start(self, target: str, mode: str) -> Any:
         machine_id = self.resolve_id(target)
@@ -189,7 +156,7 @@ class MachineService:
             try:
                 return self.start(str(machine_id), mode)
             except ApiError as exc:
-                if not _is_transient_spawn_error(exc):
+                if not is_transient_spawn_error(exc):
                     raise
                 # Jitter spreads retries out so simultaneous clients do not
                 # hammer the API in lockstep at the release moment.
@@ -219,7 +186,7 @@ class MachineService:
         while True:
             data = self.active()
             info = data.get("info") if isinstance(data, dict) else None
-            if info and _to_int(info.get("id")) == machine_id and info.get("ip"):
+            if info and to_int(info.get("id")) == machine_id and info.get("ip"):
                 return info
             if time.monotonic() + interval > deadline:
                 raise RuntimeError(
@@ -276,7 +243,7 @@ class MachineService:
                 return self.spawn(machine_id)
             raise
 
-    def _search_sources(self, retired_only: bool, include_retired: bool) -> list[tuple[bool, Any]]:
+    def _search_sources(self, retired_only: bool, include_retired: bool) -> list[SearchSource]:
         if retired_only:
             return [(True, self.list_retired)]
         if include_retired:
@@ -290,157 +257,3 @@ class MachineService:
         data = self.profile(str(target))
         info = data.get("info") if isinstance(data, dict) else None
         return info if isinstance(info, dict) else None
-
-
-def _is_transient_spawn_error(exc: ApiError) -> bool:
-    if exc.status in TRANSIENT_SPAWN_STATUSES:
-        return True
-    message = str(exc).lower()
-    return any(keyword in message for keyword in TRANSIENT_SPAWN_KEYWORDS)
-
-
-def machine_rows(payload: Any) -> list[dict[str, Any]]:
-    items = _extract_items(payload)
-    rows: list[dict[str, Any]] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        rows.append(machine_row(item))
-    return rows
-
-
-def machine_row(item: dict[str, Any]) -> dict[str, Any]:
-    play_info = item.get("playInfo")
-    if not isinstance(play_info, dict):
-        play_info = {}
-    return {
-        "id": item.get("id"),
-        "name": item.get("name"),
-        "os": item.get("os"),
-        "difficulty": item.get("difficultyText") or item.get("difficulty_text") or item.get("difficulty"),
-        "points": item.get("points") or item.get("static_points"),
-        "active": item.get("isActive") if item.get("isActive") is not None else play_info.get("isActive"),
-        "spawned": item.get("isSpawned") if item.get("isSpawned") is not None else play_info.get("isSpawned"),
-        "free": item.get("free"),
-    }
-
-
-def _extract_items(payload: Any) -> list[Any]:
-    if isinstance(payload, list):
-        return payload
-    if not isinstance(payload, dict):
-        return []
-    for key in ("data", "message", "machines", "info"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            return value
-        if isinstance(value, dict):
-            nested = value.get("data")
-            if isinstance(nested, list):
-                return nested
-    return []
-
-
-def _has_next_page(payload: Any, current_page: int) -> bool:
-    if not isinstance(payload, dict):
-        return False
-
-    links = payload.get("links")
-    if isinstance(links, dict) and "next" in links:
-        return bool(links.get("next"))
-
-    meta = payload.get("meta")
-    if isinstance(meta, dict):
-        last_page = _to_int(meta.get("last_page"))
-        page = _to_int(meta.get("current_page")) or current_page
-        if last_page is not None:
-            return page < last_page
-
-    return bool(_extract_items(payload))
-
-
-def _page_signature(items: list[Any]) -> tuple[Any, ...]:
-    signature: list[Any] = []
-    for item in items:
-        if isinstance(item, dict):
-            signature.append(item.get("id", item.get("name")))
-        else:
-            signature.append(repr(item))
-    return tuple(signature)
-
-
-def _machine_match_rank(item: dict[str, Any], query: str) -> int | None:
-    term = query.casefold()
-    name = _text(item.get("name"))
-    if name == term:
-        return 0
-    if name.startswith(term):
-        return 1
-    if term in name:
-        return 2
-
-    exact_fields = [
-        item.get("id"),
-        item.get("os"),
-        item.get("difficultyText"),
-        item.get("difficulty_text"),
-        item.get("difficulty"),
-    ]
-    if any(_text(value) == term for value in exact_fields):
-        return 3
-
-    return 4 if any(term in value for value in _searchable_machine_values(item)) else None
-
-
-def _searchable_machine_values(item: dict[str, Any]) -> list[str]:
-    values = [
-        item.get("id"),
-        item.get("name"),
-        item.get("os"),
-        item.get("difficultyText"),
-        item.get("difficulty_text"),
-        item.get("difficulty"),
-        item.get("points"),
-        item.get("static_points"),
-        item.get("ip"),
-        item.get("description"),
-        item.get("short_description"),
-        item.get("description_html"),
-        item.get("overview"),
-    ]
-
-    for key in ("maker", "maker2"):
-        maker = item.get(key)
-        if isinstance(maker, dict):
-            values.append(maker.get("name"))
-
-    tags = item.get("tags")
-    if isinstance(tags, list):
-        for tag in tags:
-            if isinstance(tag, dict):
-                values.extend(tag.values())
-            else:
-                values.append(tag)
-
-    return [_text(value) for value in values if value is not None]
-
-
-def _academy_module_names(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    names: list[str] = []
-    for item in value:
-        if isinstance(item, dict) and item.get("name"):
-            names.append(str(item["name"]))
-    return names
-
-
-def _text(value: Any) -> str:
-    return str(value).casefold()
-
-
-def _to_int(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from htb_terminal.config import DEFAULT_BASE_URL, ConfigError, load_config, load_token
+from htb_terminal.config import (
+    DEFAULT_BASE_URL,
+    ConfigError,
+    load_config,
+    load_token,
+    save_token,
+    user_token_path,
+)
 
 
 class TokenLoadingTests(unittest.TestCase):
@@ -41,6 +49,43 @@ class TokenLoadingTests(unittest.TestCase):
             with mock.patch.dict("os.environ", {}, clear=True):
                 with self.assertRaises(ConfigError):
                     load_token(token_file)
+
+
+class SaveTokenTests(unittest.TestCase):
+    def test_save_writes_to_user_config_and_normalizes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict("os.environ", {"XDG_CONFIG_HOME": tmp}, clear=True):
+                path = save_token("Bearer secret-123")
+                self.assertEqual(user_token_path(), path)
+                self.assertEqual("secret-123", path.read_text(encoding="utf-8").strip())
+
+    def test_saved_token_is_then_resolved_from_user_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "work"
+            work.mkdir()
+            previous_cwd = Path.cwd()
+            with mock.patch.dict("os.environ", {"XDG_CONFIG_HOME": tmp}, clear=True):
+                save_token("saved-token")
+                # From a directory with no ./api.token, resolution falls
+                # through to the user config file written by save_token.
+                os.chdir(work)
+                try:
+                    self.assertEqual("saved-token", load_token())
+                finally:
+                    os.chdir(previous_cwd)
+
+    def test_save_to_explicit_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "nested" / "token"
+            with mock.patch.dict("os.environ", {}, clear=True):
+                path = save_token("abc", target)
+                self.assertEqual(target, path)
+                self.assertEqual("abc", load_token(target))
+
+    def test_save_rejects_empty_token(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(ConfigError):
+                save_token("   ")
 
 
 class ConfigTests(unittest.TestCase):

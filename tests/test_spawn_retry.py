@@ -5,7 +5,8 @@ from typing import Any
 from unittest import mock
 
 from htb_terminal.http import ApiError
-from htb_terminal.services.machines import MachineService, _is_transient_spawn_error
+from htb_terminal.services.machines import MachineService
+from htb_terminal.services.spawn import is_transient_spawn_error
 
 
 class SequenceClient:
@@ -31,17 +32,17 @@ class SequenceClient:
 
 class TransientSpawnErrorTests(unittest.TestCase):
     def test_capacity_statuses_and_messages_are_transient(self):
-        self.assertTrue(_is_transient_spawn_error(ApiError(503, "HTTP 503")))
-        self.assertTrue(_is_transient_spawn_error(ApiError(429, "HTTP 429")))
+        self.assertTrue(is_transient_spawn_error(ApiError(503, "HTTP 503")))
+        self.assertTrue(is_transient_spawn_error(ApiError(429, "HTTP 429")))
         self.assertTrue(
-            _is_transient_spawn_error(
+            is_transient_spawn_error(
                 ApiError(400, "HTTP 400: All spawn slots are full, try again later")
             )
         )
 
     def test_other_errors_are_not_transient(self):
-        self.assertFalse(_is_transient_spawn_error(ApiError(401, "HTTP 401: Unauthorized")))
-        self.assertFalse(_is_transient_spawn_error(ApiError(404, "HTTP 404: Not found")))
+        self.assertFalse(is_transient_spawn_error(ApiError(401, "HTTP 401: Unauthorized")))
+        self.assertFalse(is_transient_spawn_error(ApiError(404, "HTTP 404: Not found")))
 
 
 class StartWithRetryTests(unittest.TestCase):
