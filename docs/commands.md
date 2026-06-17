@@ -419,6 +419,45 @@ This command makes no network calls and needs no token.
 
 ---
 
+## speedrun
+
+One-shot season-release flow for when a seasonal machine drops and spawn
+capacity fills instantly. It runs these steps with a live, emoji-free status
+line for each:
+
+1. Resolve the machine id.
+2. Switch your account to the VPN server and download its OVPN file.
+3. Start OpenVPN and wait for the tunnel interface to come up.
+4. Set the interface MTU (default 1300).
+5. Spawn the machine, retrying capacity rejections (same logic as
+   `machine start --wait`).
+6. Wait for the machine IP and print it.
+
+The VPN then runs in the foreground; press Ctrl-C to disconnect.
+
+```bash
+sudo htb speedrun Seasonal us-free-1
+sudo htb speedrun 478 us-free-1 --mtu 1280 --retry-for 1200
+```
+
+| Argument / option | Default | Description |
+| --- | --- | --- |
+| `target` | — | Machine id or name. |
+| `server` | — | VPN server id or alias (see `htb vpn servers`). |
+| `-o, --output PATH` | `lab-vpn.ovpn` | Where to write the OVPN file. A sibling `.log` holds OpenVPN output. |
+| `--variant N` | `0` | OVPN variant. |
+| `--interface NAME` | `tun0` | Tunnel interface to tune. |
+| `--mtu N` | `1300` | MTU to set on the interface. |
+| `--mode {auto,play,spawn}` | `auto` | Which start endpoint to use. |
+| `--retry-for SECONDS` | `900` | Keep retrying the spawn for up to this long. |
+| `--interval SECONDS` | `15` | Base delay between spawn attempts (jittered ±20%). |
+| `--openvpn-command CMD` | `openvpn` | OpenVPN command; `--config <file>` is appended. |
+
+`speedrun` needs root to run OpenVPN and change the MTU, so run it with `sudo`.
+It uses the same endpoints as `vpn switch`, `vpn download`, and `machine start`.
+
+---
+
 ## raw
 
 Call any Labs v4 endpoint directly with your token. Useful for endpoints not

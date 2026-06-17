@@ -118,6 +118,9 @@ Full details for each command are in the [command reference](docs/commands.md).
 ./htb vpn download us-free-1 -o lab-vpn.ovpn
 ./htb vpn connect us-free-1 -o lab-vpn.ovpn
 
+# Speedrun a seasonal release: connect VPN, set MTU 1300, spawn, wait for IP.
+sudo htb speedrun Seasonal us-free-1
+
 ./htb raw GET /machine/active
 ./htb raw POST /vm/spawn --data '{"machine_id":478}'
 ```
@@ -173,6 +176,34 @@ Useful options:
 
 Without `--profiles`, the query matches machine id, name, OS, difficulty, tags, maker names, and common list fields. Use `--profiles` for terms that may only exist in the detailed machine profile, for example description text mentioning breached credentials.
 
+## Speedrun a season release
+
+When a seasonal machine drops (Saturdays 19:00 UTC), the slow part is the manual
+dance of connecting the VPN, fixing the tunnel MTU, and spamming spawn until a
+slot frees up. `speedrun` does all of it in one command and shows a live,
+emoji-free status for each step:
+
+```bash
+sudo htb speedrun Seasonal us-free-1
+```
+
+```
+speedrun: Seasonal via us-free-1
+  resolve machine 'Seasonal' ... ok
+  switch vpn server us-free-1 ... ok
+  download ovpn config ... ok
+  start openvpn ... ok
+  wait for tun0 ... ok (3s)
+  set tun0 mtu 1300 ... ok
+  spawn machine ... ok (42s)
+  wait for machine ip ... ok (18s)
+ready: Seasonal 10.10.11.50
+```
+
+It needs root (for OpenVPN and the MTU change), so run it with `sudo`. The VPN
+runs in the foreground; press Ctrl-C to disconnect. Tunables: `--mtu`,
+`--interface`, `--retry-for`, `--interval`, `--mode`, and `--variant`.
+
 ## Shell completion
 
 Enable tab-completion for commands, subcommands, and options. The same script
@@ -188,18 +219,23 @@ eval "$(htb completion zsh)"
 
 ## Architecture
 
+- `htb_terminal/cli.py`: thin entry point — dispatch and error rendering.
+- `htb_terminal/parser.py`: argparse definitions, one builder per command group.
+- `htb_terminal/handlers.py`: command handlers (args + client -> result).
 - `htb_terminal/config.py`: loads/saves the token and API URL.
 - `htb_terminal/http.py`: authenticated HTTP client.
 - `htb_terminal/output.py`: human-readable and JSON rendering.
+- `htb_terminal/ui.py`: `StepRunner` live step status for workflows.
+- `htb_terminal/netcfg.py`: host network/process ops (OpenVPN, interface, MTU).
 - `htb_terminal/timefmt.py`: relative time formatting for display.
 - `htb_terminal/completion.py`: bash/zsh completion scripts from one command map.
 - `htb_terminal/services/machines.py`: `MachineService` — machine API operations.
 - `htb_terminal/services/user.py`: `UserService` — current-user profile.
+- `htb_terminal/services/speedrun.py`: `SpeedrunService` — season-release flow.
 - `htb_terminal/services/payloads.py`: pure helpers that reshape machine-list JSON.
 - `htb_terminal/services/search.py`: local machine search and result ranking.
 - `htb_terminal/services/spawn.py`: transient spawn-failure detection.
 - `htb_terminal/services/vpn.py`: VPN and OVPN operations.
-- `htb_terminal/cli.py`: CLI parsing and orchestration.
 
 Each module keeps a single responsibility to make future changes easier if HTB
 changes an endpoint. `MachineService` only talks to the API; payload reshaping,
