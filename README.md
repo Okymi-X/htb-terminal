@@ -25,9 +25,23 @@ Compact active-machine output keeps the session details and profile-only status 
 
 ![Active machine output](docs/screenshots/machine-active.png)
 
+`machine active --oneline` collapses that into a single status line.
+
+![Active machine one-line status](docs/screenshots/machine-oneline.png)
+
 Tables use compact columns, terminal colors, and truncation by default. Use `--wide` when you need full values.
 
 ![VPN server table output](docs/screenshots/vpn-servers.png)
+
+`user info` shows your rank, points, and owns at a glance.
+
+![User profile summary](docs/screenshots/user-info.png)
+
+`speedrun` shows a live, per-step status while it connects the VPN, sets the MTU, and spawns the machine.
+
+![Speedrun status output](docs/screenshots/speedrun.png)
+
+These images are generated with `scripts/screenshots.sh` (see [Regenerating screenshots](#regenerating-screenshots)).
 
 ## Installation
 
@@ -241,6 +255,24 @@ Each module keeps a single responsibility to make future changes easier if HTB
 changes an endpoint. `MachineService` only talks to the API; payload reshaping,
 search ranking, and spawn-error detection are stateless modules it composes, so
 they are testable in isolation and stay small.
+
+## Regenerating screenshots
+
+The images in `docs/screenshots/` are produced with
+[charmbracelet/freeze](https://github.com/charmbracelet/freeze), which renders a
+command's output straight to PNG:
+
+```bash
+go install github.com/charmbracelet/freeze@latest   # or: brew install freeze
+scripts/screenshots.sh                  # capture all shots
+scripts/screenshots.sh vpn-servers speedrun   # capture a subset
+```
+
+Commands that hit the API need a saved token (`htb init`); the `machine active`
+shots need an active machine. The `speedrun` shot uses
+`scripts/demo_speedrun.py`, which renders a realistic status with no token, root,
+or network. Pass `--color always` (the script already does) so colors survive
+the non-TTY capture.
 
 ## Development
 
