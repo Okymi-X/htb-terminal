@@ -41,7 +41,7 @@ Tables use compact columns, terminal colors, and truncation by default. Use `--w
 
 ![Speedrun status output](docs/screenshots/speedrun.png)
 
-These images are generated with `scripts/screenshots.sh` (see [Regenerating screenshots](#regenerating-screenshots)).
+These images are generated with `scripts/screenshots.py` (see [Regenerating screenshots](#regenerating-screenshots)).
 
 ## Installation
 
@@ -202,17 +202,10 @@ already connected to the VPN, add `--wait` to keep retrying until a slot frees
 up and then block until the machine reports its IP:
 
 ```bash
-./htb machine start Nimbus --mode auto --wait --retry-for 360 --interval 5
+./htb machine start Connected --mode auto --wait --retry-for 360 --interval 5
 ```
 
-```json
-{
-  "id": 912,
-  "name": "Nimbus",
-  "ip": "10.129.1.2",
-  "spawn": { "message": "Machine deployed to lab." }
-}
-```
+![Seasonal spawn with --wait](docs/screenshots/machine-start-wait.png)
 
 - `--retry-for SECONDS`: total time to keep retrying the spawn (default 600).
 - `--interval SECONDS`: base delay between spawn attempts and IP-availability
@@ -293,21 +286,19 @@ they are testable in isolation and stay small.
 
 ## Regenerating screenshots
 
-The images in `docs/screenshots/` are produced with
-[charmbracelet/freeze](https://github.com/charmbracelet/freeze), which renders a
-command's output straight to PNG:
+The images in `docs/screenshots/` are produced by `scripts/screenshots.py`,
+which renders each command's output to SVG with `rich` and screenshots it with a
+headless Chromium — no PTY needed, so it works on CI and remote boxes:
 
 ```bash
-go install github.com/charmbracelet/freeze@latest   # or: brew install freeze
-scripts/screenshots.sh                  # capture all shots
-scripts/screenshots.sh vpn-servers speedrun   # capture a subset
+python3 scripts/screenshots.py                 # capture all shots
+python3 scripts/screenshots.py vpn-servers speedrun   # capture a subset
 ```
 
 Commands that hit the API need a saved token (`htb init`); the `machine active`
-shots need an active machine. The `speedrun` shot uses
-`scripts/demo_speedrun.py`, which renders a realistic status with no token, root,
-or network. Pass `--color always` (the script already does) so colors survive
-the non-TTY capture.
+shots need an active machine. The `speedrun` and `machine-start-wait` shots use
+the fixed demos `scripts/demo_speedrun.py` and `scripts/demo_seasonal_start.py`,
+which render a realistic status with no token, root, or network.
 
 ## Development
 
