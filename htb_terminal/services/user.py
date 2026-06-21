@@ -53,6 +53,19 @@ def user_summary(profile: dict[str, Any]) -> dict[str, Any]:
             "respects": profile.get("respects"),
             "country": profile.get("country_name"),
             "team": team_name,
-            "vip": profile.get("isVip"),
+            "vip": vip_tier(profile),
         }
     }
+
+
+def vip_tier(profile: dict[str, Any]) -> str:
+    """HTB's tiers: VIP+ (dedicated) outranks VIP; otherwise no subscription.
+
+    ``isVip`` is false for VIP+ accounts, so dedicated VIP must be checked
+    separately or the tool reports a paying user as having none.
+    """
+    if profile.get("isDedicatedVip"):
+        return "VIP+"
+    if profile.get("isVip"):
+        return "VIP"
+    return "no"

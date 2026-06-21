@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from htb_terminal.services.user import UserService, user_summary
+from htb_terminal.services.user import UserService, user_summary, vip_tier
 
 
 class FakeClient:
@@ -68,6 +68,16 @@ class UserSummaryTests(unittest.TestCase):
     def test_team_can_be_plain_value(self) -> None:
         summary = user_summary({"id": 1, "name": "x", "team": None})
         self.assertIsNone(summary["info"]["team"])
+
+    def test_vip_tier_reports_dedicated_vip_as_plus(self) -> None:
+        # VIP+ accounts have isVip == False, so isDedicatedVip must win.
+        self.assertEqual("VIP+", vip_tier({"isVip": False, "isDedicatedVip": True}))
+        self.assertEqual("VIP", vip_tier({"isVip": True, "isDedicatedVip": False}))
+        self.assertEqual("no", vip_tier({"isVip": False}))
+
+    def test_summary_surfaces_vip_plus(self) -> None:
+        summary = user_summary({"id": 5, "name": "neo", "isDedicatedVip": True})
+        self.assertEqual("VIP+", summary["info"]["vip"])
 
 
 if __name__ == "__main__":
