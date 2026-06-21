@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import sys
 import textwrap
 from typing import Any
+
+from htb_terminal import box, theme
 
 RESET = "\033[0m"
 STYLES = {
@@ -16,6 +17,7 @@ STYLES = {
     "green": "\033[32m",
     "red": "\033[31m",
     "yellow": "\033[33m",
+    "magenta": "\033[35m",
 }
 
 
@@ -65,7 +67,7 @@ def print_table(
         for column in columns:
             raw = row.get(column)
             text = _truncate(_format_cell(raw), widths[column]).ljust(widths[column])
-            cells.append(_format_cell_for_output(raw, text, enabled))
+            cells.append(_style(text, theme.cell_style(column, raw), enabled))
         print("  ".join(cells))
 
 
@@ -163,7 +165,7 @@ def _print_mapping(mapping: dict[str, Any], *, color: bool, width: int, indent: 
     if len(mapping) == 1:
         key, value = next(iter(mapping.items()))
         if isinstance(value, dict):
-            print(f"{' ' * indent}{_style(str(key), 'bold', color)}")
+            _print_section_header(str(key), color=color, indent=indent)
             _print_mapping(value, color=color, width=width, indent=indent + 2)
             return
 
@@ -175,6 +177,15 @@ def _print_mapping(mapping: dict[str, Any], *, color: bool, width: int, indent: 
     key_width = min(max(len(key) for key, _ in items), 22)
     for key, value in items:
         _print_field(key, value, key_width=key_width, color=color, width=width, indent=indent)
+
+
+def _print_section_header(title: str, *, color: bool, indent: int) -> None:
+    left = " " * indent
+    if indent == 0:
+        for line in box.section_header(title, enabled=color):
+            print(f"{left}{line}")
+        return
+    print(f"{left}{_style(title, 'bold', color)}")
 
 
 def _print_field(key: str, value: Any, *, key_width: int, color: bool, width: int, indent: int) -> None:
@@ -201,13 +212,13 @@ def _print_field(key: str, value: Any, *, key_width: int, color: bool, width: in
         _print_list(value, indent=indent + 2, color=color, width=width)
         return
 
-    text = _format_value(value, color)
-    plain_text = _strip_ansi(text)
+    field_style = theme.cell_style(key, value)
+    plain_text = _format_cell(value)
     available = max(24, width - len(plain_label))
     wrapped = textwrap.wrap(plain_text, width=available, break_long_words=False, break_on_hyphens=False) or [""]
-    print(f"{label}{_style(wrapped[0], _value_style(value), color)}")
+    print(f"{label}{_style(wrapped[0], field_style, color)}")
     for line in wrapped[1:]:
-        print(f"{' ' * len(plain_label)}{_style(line, _value_style(value), color)}")
+        print(f"{' ' * len(plain_label)}{_style(line, field_style, color)}")
 
 
 def _print_list(values: list[Any], *, indent: int, color: bool, width: int) -> None:
@@ -251,21 +262,7 @@ def _item_summary(value: dict[str, Any]) -> str:
 
 
 def _format_value(value: Any, color: bool) -> str:
-    return _style(_format_cell(value), _value_style(value), color)
-
-
-def _format_cell_for_output(value: Any, text: str, color: bool) -> str:
-    return _style(text, _value_style(value), color)
-
-
-def _value_style(value: Any) -> str:
-    if isinstance(value, bool):
-        return "green" if value else "red"
-    if value is None:
-        return "dim"
-    if isinstance(value, (int, float)):
-        return "yellow"
-    return "yellow"
+    return _style(_format_cell(value), theme.value_style(value), color)
 
 
 def _is_empty(value: Any) -> bool:
@@ -288,7 +285,3 @@ def _style(text: str, style: str, enabled: bool) -> str:
     if not enabled:
         return text
     return f"{STYLES[style]}{text}{RESET}"
-
-
-def _strip_ansi(text: str) -> str:
-    return re.sub(r"\x1b\[[0-9;]*m", "", text)
