@@ -13,6 +13,7 @@ from typing import Any
 
 from htb_terminal import __version__, handlers
 from htb_terminal.helpfmt import HtbHelpFormatter, banner
+from htb_terminal.services.vpn import VPN_PRODUCTS
 
 _SubParsers = argparse._SubParsersAction
 
@@ -204,10 +205,27 @@ def _add_vpn_commands(subparsers: _SubParsers, common: argparse.ArgumentParser) 
     vpn = subparsers.add_parser("vpn", help="Manage VPN server selection and OVPN files.")
     vpn_sub = vpn.add_subparsers(dest="vpn_command")
 
-    servers = _leaf(vpn_sub, "servers", common, help="Show known VPN server aliases.")
+    servers = _leaf(
+        vpn_sub,
+        "servers",
+        common,
+        help="List VPN servers your account can use (live), including VIP/VIP+.",
+    )
+    servers.add_argument(
+        "product",
+        nargs="?",
+        default="labs",
+        choices=list(VPN_PRODUCTS),
+        help="Which server pool to list. Default labs (regular machines).",
+    )
+    servers.add_argument(
+        "--static",
+        action="store_true",
+        help="Skip the API and show only the built-in offline aliases.",
+    )
     servers.set_defaults(handler=handlers.vpn_servers)
 
-    switch = _leaf(vpn_sub, "switch", common, help="Switch to a VPN server by id or alias.")
+    switch = _leaf(vpn_sub, "switch", common, help="Switch to a VPN server by id, alias, or name.")
     switch.add_argument("server")
     switch.set_defaults(handler=handlers.vpn_switch)
 
@@ -248,7 +266,7 @@ def _add_speedrun_command(subparsers: _SubParsers, common: argparse.ArgumentPars
         " stays in the foreground; press Ctrl-C to disconnect.",
     )
     speedrun.add_argument("target", help="Machine id or name.")
-    speedrun.add_argument("server", help="VPN server id or alias (see 'htb vpn servers').")
+    speedrun.add_argument("server", help="VPN server id, alias, or name (see 'htb vpn servers').")
     speedrun.add_argument("-o", "--output", type=Path, default=Path("lab-vpn.ovpn"))
     speedrun.add_argument("--variant", type=int, default=0)
     speedrun.add_argument("--interface", default="tun0", help="Tunnel interface to tune. Default tun0.")

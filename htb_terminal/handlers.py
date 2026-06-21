@@ -19,7 +19,7 @@ from typing import Any
 from htb_terminal import box
 from htb_terminal.completion import completion_script
 from htb_terminal.config import load_config, save_token
-from htb_terminal.http import HtbApiClient
+from htb_terminal.http import ApiError, HtbApiClient
 from htb_terminal.output import (
     color_enabled,
     print_json,
@@ -31,7 +31,7 @@ from htb_terminal.services.machines import MachineService
 from htb_terminal.services.payloads import machine_rows
 from htb_terminal.services.speedrun import SpeedrunService
 from htb_terminal.services.user import UserService
-from htb_terminal.services.vpn import VpnService, vpn_rows
+from htb_terminal.services.vpn import VpnService, server_rows, vpn_rows
 from htb_terminal.ui import StepRunner
 
 
@@ -178,6 +178,28 @@ def machine_submit(args: argparse.Namespace, client: HtbApiClient) -> Any:
 
 
 def vpn_servers(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    if not args.static:
+        try:
+            payload = _vpn_service(client).list_servers(args.product)
+            rows = server_rows(payload)
+        except ApiError as exc:
+            print(
+                f"warning: could not fetch live servers ({exc});"
+                " showing built-in aliases. Use --static to silence this.",
+                file=sys.stderr,
+            )
+            rows = []
+        if rows:
+            if args.json:
+                return payload
+            print_table(
+                rows,
+                ["id", "name", "group", "location", "clients", "full", "assigned"],
+                color=args.color,
+                wide=args.wide,
+            )
+            return None
+
     rows = vpn_rows()
     if args.json:
         return rows

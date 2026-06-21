@@ -8,3 +8,4 @@ api.token
 build/
 dist/
 *.egg-info/
+*.log

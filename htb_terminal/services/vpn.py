@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from htb_terminal.http import HtbApiClient
+from htb_terminal.services.payloads import to_int
+
+# Server pools exposed by GET /connections/servers. "labs" covers regular
+# machines including the VIP / VIP+ / dedicated pools a paid account unlocks.
+VPN_PRODUCTS = ("labs", "starting_point", "competitive", "fortresses")
 
 
 @dataclass(frozen=True)
@@ -36,15 +41,60 @@ class VpnService:
         self.client = client
 
     def switch(self, server: str) -> Any:
-        server_id = resolve_server_id(server)
+        server_id = self.resolve_server(server)
         return self.client.post(f"/connections/servers/switch/{server_id}")
 
+    def list_servers(self, product: str = "labs") -> Any:
+        """Fetch the VPN servers the account can actually use for ``product``.
+
+        Unlike the static :data:`KNOWN_VPN_SERVERS` table this reflects the
+        live entitlement, so VIP / VIP+ / dedicated lab servers show up for
+        paid accounts (retired machines only deploy on those).
+        """
+        return self.client.get("/connections/servers", query={"product": product})
+
     def download_ovpn(self, server: str, variant: int, output: Path) -> Path:
-        server_id = resolve_server_id(server)
+        server_id = self.resolve_server(server)
         content = self.client.download(f"/access/ovpnfile/{server_id}/{variant}")
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(content)
         return output
+
+    def resolve_server(self, value: str) -> int:
+        """Resolve a server value to its numeric ID.
+
+        Accepts, in priority order:
+        1. A numeric ID ("289")
+        2. A static alias ("us-free-1")
+        3. A live friendly name from ``/connections/servers`` ("US Machines VIP+ 1")
+
+        The live lookup is only attempted when the first two fail, so it adds no
+        API call for the common numeric-ID and alias paths.
+        """
+        try:
+            return resolve_server_id(value)
+        except RuntimeError:
+            pass
+        return self._resolve_server_by_name(value)
+
+    def _resolve_server_by_name(self, name: str) -> int:
+        """Search the live server listing across all products for *name*."""
+        needle = name.strip().lower()
+        for product in VPN_PRODUCTS:
+            try:
+                rows = server_rows(self.list_servers(product))
+            except Exception:
+                continue
+            for row in rows:
+                friendly = (row.get("name") or "").lower()
+                if friendly == needle:
+                    return row["id"]
+        known = ", ".join(sorted(KNOWN_VPN_SERVERS))
+        raise RuntimeError(
+            f"Unknown VPN server {name!r}. Not a numeric ID, known alias, or "
+            f"live server name. Known aliases: {known}. "
+            "Use 'htb vpn servers' to see live server names and IDs."
+        )
 
     def connect(
         self,
@@ -95,4 +145,62 @@ def vpn_rows() -> list[dict[str, Any]]:
         }
         for alias, server in KNOWN_VPN_SERVERS.items()
     ]
+
+
+def server_rows(payload: Any) -> list[dict[str, Any]]:
+    """Flatten ``/connections/servers`` into table rows.
+
+    The API nests servers as ``data.options[product][location].servers[id]``
+    and marks the current pick under ``data.assigned``. We walk it defensively
+    — any group object carrying a ``servers`` map is expanded — so VIP, VIP+,
+    and dedicated pools all surface regardless of their grouping labels. The
+    assigned server sorts first.
+    """
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return []
+    assigned = data.get("assigned") if isinstance(data.get("assigned"), dict) else None
+    assigned_id = to_int(assigned.get("id")) if assigned else None
+
+    rows: list[dict[str, Any]] = []
+    seen: set[int] = set()
+
+    def add(server: dict[str, Any], group: str) -> None:
+        sid = to_int(server.get("id"))
+        if sid is None or sid in seen:
+            return
+        seen.add(sid)
+        rows.append(
+            {
+                "id": sid,
+                "name": server.get("friendly_name"),
+                "group": group,
+                "location": server.get("location"),
+                "clients": server.get("current_clients"),
+                "full": bool(server.get("full")),
+                "assigned": sid == assigned_id,
+            }
+        )
+
+    def walk(node: Any, group: str) -> None:
+        if not isinstance(node, dict):
+            return
+        servers = node.get("servers")
+        if isinstance(servers, dict):
+            label = str(node.get("name") or group)
+            for server in servers.values():
+                if isinstance(server, dict):
+                    add(server, label)
+            return
+        for key, value in node.items():
+            child_group = str(value.get("name") or key) if isinstance(value, dict) else group
+            walk(value, child_group)
+
+    walk(data.get("options"), "")
+    if assigned is not None:
+        # Make sure the active server shows even if it is absent from options.
+        add(assigned, str(assigned.get("location_type_friendly") or "assigned"))
+
+    rows.sort(key=lambda r: (not r["assigned"], r["group"] or "", r["id"]))
+    return rows
 

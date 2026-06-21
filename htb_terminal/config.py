@@ -46,15 +46,36 @@ def save_token(token: str, token_file: Path | None = None) -> Path:
     return path
 
 
+def _sudo_user_token_path() -> Path | None:
+    """Token path for the user who invoked ``sudo``.
+
+    Under ``sudo`` ``$HOME`` is usually ``/root``, so a token saved by ``htb
+    init`` as the normal user is invisible — which breaks ``htb speedrun`` (it
+    needs root for OpenVPN). Fall back to the inviting user's config dir so the
+    elevated run still finds the same token.
+    """
+    sudo_user = os.environ.get("SUDO_USER")
+    if not sudo_user or sudo_user == "root":
+        return None
+    try:
+        import pwd
+
+        home = Path(pwd.getpwnam(sudo_user).pw_dir)
+    except (KeyError, ImportError):
+        return None
+    return home / ".config" / "htb-terminal" / "token"
+
+
 def _resolve_token_path(token_file: Path | None) -> Path | None:
     if token_file is not None:
         return token_file
-    local = Path("api.token")
-    if local.exists():
-        return local
-    user = user_token_path()
-    if user.exists():
-        return user
+    candidates = [Path("api.token"), user_token_path()]
+    sudo_path = _sudo_user_token_path()
+    if sudo_path is not None:
+        candidates.append(sudo_path)
+    for path in candidates:
+        if path.exists():
+            return path
     return None
 
 

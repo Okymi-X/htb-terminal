@@ -31,6 +31,32 @@ class TokenLoadingTests(unittest.TestCase):
             with mock.patch.dict("os.environ", {"HTB_API_TOKEN": "env-token"}):
                 self.assertEqual("env-token", load_token(token_file))
 
+    def test_falls_back_to_sudo_user_token_under_sudo(self):
+        # Under sudo HOME is /root; the token saved as the normal user must
+        # still be found via SUDO_USER so `sudo htb speedrun` works.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            sudo_home = tmp / "okymi"
+            token = sudo_home / ".config" / "htb-terminal" / "token"
+            token.parent.mkdir(parents=True)
+            token.write_text("sudo-token\n", encoding="utf-8")
+            root_home = tmp / "root"
+            root_home.mkdir()
+            work = tmp / "work"
+            work.mkdir()
+
+            prev = os.getcwd()
+            os.chdir(work)
+            try:
+                env = {"HOME": str(root_home), "SUDO_USER": "okymi"}
+                with (
+                    mock.patch.dict("os.environ", env, clear=True),
+                    mock.patch("pwd.getpwnam", return_value=mock.Mock(pw_dir=str(sudo_home))),
+                ):
+                    self.assertEqual("sudo-token", load_token())
+            finally:
+                os.chdir(prev)
+
     def test_strips_bearer_and_authorization_prefixes(self):
         with mock.patch.dict("os.environ", {"HTB_API_TOKEN": "Authorization: Bearer abc123"}):
             self.assertEqual("abc123", load_token())

@@ -161,7 +161,8 @@ The filters `--retired`, `--todo`, `--unreleased`, and `--sp-tier` are
 mutually exclusive; choose at most one.
 
 Endpoints: `GET /machine/paginated`, `GET /machine/list/retired/paginated`,
-`GET /machine/todo`, `GET /machine/unreleased`, `GET /sp/tier/{tier}`
+`GET /machines?todo=1` (v5), `GET /machines?state=unreleased` (v5),
+`GET /machines?spTier=N` (v5)
 
 ### machine search
 
@@ -223,8 +224,8 @@ that do spawn can take a while to receive an IP. `--wait` handles both:
   not retry in lockstep. Non-transient errors (401, 404, ...) still fail
   immediately.
 - After a successful spawn, the command polls the active machine until an
-  IP is assigned (up to 5 minutes, at the `--interval` cadence), then
-  prints the id, name, and IP.
+  IP is assigned (up to `--retry-for` seconds, at the `--interval` cadence),
+  then prints the id, name, and IP.
 
 ```bash
 # Fire this right at the release moment and walk away:
@@ -301,19 +302,34 @@ Endpoint: `POST /machine/own`
 
 ## vpn
 
-VPN commands accept either a numeric server id or one of the known aliases
-listed by `htb vpn servers`.
+VPN commands accept a server target as a numeric id, a known alias, or a
+friendly server name from the live listing. The name is matched
+case-insensitively against the `name` column of `htb vpn servers`.
 
 ### vpn servers
 
-Show the known VPN server aliases as a table with columns `alias`, `id`,
-`name`, `scope`, `location`.
+List the VPN servers your account can use, fetched live from the API.
+Includes VIP and VIP+ pools when your subscription covers them. Without
+an argument, lists the `labs` product (regular machines).
 
 ```bash
-htb vpn servers
+htb vpn servers                # labs (default)
+htb vpn servers starting_point
+htb vpn servers --static       # offline alias table only
 ```
 
-Known aliases:
+| Argument / option | Default | Description |
+| --- | --- | --- |
+| `product` | `labs` | Optional positional. Which server pool to list: `labs`, `starting_point`, `competitive`, `fortresses`. |
+| `--static` | off | Skip the API and show only the built-in offline aliases. |
+
+Columns: `id`, `name`, `group`, `location`, `clients`, `full`, `assigned`.
+The assigned server sorts first. When the live fetch fails, falls back to
+the static alias table automatically.
+
+Endpoint: `GET /connections/servers?product=<product>`
+
+Built-in aliases (always available, also shown with `--static`):
 
 | Alias | Id | Scope | Location |
 | --- | --- | --- | --- |
@@ -328,8 +344,6 @@ Known aliases:
 | `au-free-1` | 177 | machines | AU |
 | `sg-free-1` | 251 | machines | SG |
 
-Any other server can be used by passing its numeric id directly.
-
 ### vpn switch
 
 Switch your account to a VPN server.
@@ -337,11 +351,12 @@ Switch your account to a VPN server.
 ```bash
 htb vpn switch us-free-1
 htb vpn switch 254
+htb vpn switch 'EU Machines VIP+ 1'
 ```
 
 | Argument | Description |
 | --- | --- |
-| `server` | Server id or alias. |
+| `server` | Server id, alias, or live server name. |
 
 Endpoint: `POST /connections/servers/switch/{id}`
 
@@ -356,7 +371,7 @@ htb vpn download eu-free-2 -o configs/eu.ovpn --variant 1
 
 | Argument / option | Default | Description |
 | --- | --- | --- |
-| `server` | — | Server id or alias. |
+| `server` | -- | Server id, alias, or live server name. |
 | `-o, --output PATH` | `lab-vpn.ovpn` | Where to write the OVPN file. Parent directories are created. |
 | `--variant N` | `0` | OVPN variant. `0` is UDP; other values select alternative protocols when HTB offers them (for example TCP). |
 
@@ -375,7 +390,7 @@ htb vpn connect eu-free-1 -o lab-vpn.ovpn --openvpn-command "sudo openvpn"
 
 | Argument / option | Default | Description |
 | --- | --- | --- |
-| `server` | — | Server id or alias. |
+| `server` | -- | Server id, alias, or live server name. |
 | `-o, --output PATH` | `lab-vpn.ovpn` | Where to write the OVPN file. |
 | `--variant N` | `0` | OVPN variant. |
 | `--openvpn-command CMD` | `sudo openvpn` | Command to run; `--config <file>` is appended. |
@@ -446,8 +461,8 @@ sudo htb speedrun 478 us-free-1 --mtu 1280 --retry-for 1200
 
 | Argument / option | Default | Description |
 | --- | --- | --- |
-| `target` | — | Machine id or name. |
-| `server` | — | VPN server id or alias (see `htb vpn servers`). |
+| `target` | -- | Machine id or name. |
+| `server` | -- | VPN server id, alias, or live server name (see `htb vpn servers`). |
 | `-o, --output PATH` | `lab-vpn.ovpn` | Where to write the OVPN file. A sibling `.log` holds OpenVPN output. |
 | `--variant N` | `0` | OVPN variant. |
 | `--interface NAME` | `tun0` | Tunnel interface to tune. |

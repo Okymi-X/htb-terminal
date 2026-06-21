@@ -4,7 +4,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Python terminal client for selected HTB Labs v4 API workflows:
+Python terminal client for selected HTB Labs API workflows (v4 and v5):
 machines, VPN, OVPN files, and raw API calls. Zero external dependencies.
 
 See the [command reference](docs/commands.md) for every command, option,
@@ -132,12 +132,15 @@ Full details for each command are in the [command reference](docs/commands.md).
 ./htb user info
 
 ./htb vpn servers
+./htb vpn servers starting_point
 ./htb vpn switch us-free-1
+./htb vpn switch 'US Machines VIP+ 1'     # friendly names from live listing work
 ./htb vpn download us-free-1 -o lab-vpn.ovpn
 ./htb vpn connect us-free-1 -o lab-vpn.ovpn
 
 # Speedrun a seasonal release: connect VPN, set MTU 1300, spawn, wait for IP.
 sudo htb speedrun Seasonal us-free-1
+sudo htb speedrun Pov 'US Machines VIP+ 1'   # live server name also works
 
 ./htb raw GET /machine/active
 ./htb raw POST /vm/spawn --data '{"machine_id":478}'
@@ -208,25 +211,35 @@ up and then block until the machine reports its IP:
 ![Seasonal spawn with --wait](docs/screenshots/machine-start-wait.png)
 
 - `--retry-for SECONDS`: total time to keep retrying the spawn (default 600).
-- `--interval SECONDS`: base delay between spawn attempts and IP-availability
+- `--interval SECONDS`: base delay between spawn attempts and ready-state
   polls; each spawn delay is jittered ±20% so simultaneous clients do not retry
   in lockstep at the release moment.
 
-Only transient rejections are retried — capacity messages (`full`, `busy`,
-`try again`, …) and `429`/`5xx` responses, including the Release Arena's
-"Failed to spawn … Please try again." Real failures (bad token, unknown
-machine) fail fast instead of spinning for minutes. For the full hands-off flow
-that also connects the VPN and tunes the MTU, use `speedrun` below.
+Only transient rejections are retried -- capacity messages (`full`, `busy`,
+`try again`, ...) and `429`/`5xx` responses, including the Release Arena's
+"Failed to spawn ... Please try again." Real failures (bad token, unknown
+machine) fail fast instead of spinning for minutes.
+
+If HTB rejects the start with "You already have an active instance", the
+command inspects what is active and reacts automatically:
+
+- **Same machine, already has an IP** -- returns it without churning the instance.
+- **Same machine, no IP (stuck slot)** -- terminates the stuck instance and retries.
+- **Different machine is active** -- fails with a clear error naming the blocker.
+
+For the full hands-off flow that also connects the VPN and tunes the MTU,
+use `speedrun` below.
 
 ## Speedrun a season release
 
 When a seasonal machine drops (Saturdays 19:00 UTC), the slow part is the manual
 dance of connecting the VPN, fixing the tunnel MTU, and spamming spawn until a
-slot frees up. `speedrun` does all of it in one command and shows a live,
-emoji-free status for each step:
+slot frees up. `speedrun` does all of it in one command and shows a live status
+for each step:
 
 ```bash
 sudo htb speedrun Seasonal us-free-1
+sudo htb speedrun Pov 'EU Machines VIP+ 1'
 ```
 
 ```
