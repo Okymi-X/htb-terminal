@@ -44,6 +44,10 @@ SHOTS: dict[str, tuple[str, list[str]]] = {
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
+# Floor on the render width (in columns) so shots with short, stacked output
+# (user info, machine active) come out landscape instead of tall and narrow.
+_MIN_WIDTH = 66
+
 
 def _prompt(command: str) -> str:
     # Green "$" + bold command, like a real shell prompt above the output.
@@ -69,7 +73,8 @@ def _capture(command: list[str]) -> str:
 
 
 def _to_svg(name: str, ansi: str) -> Path:
-    width = max((len(_ANSI.sub("", line)) for line in ansi.split("\n")), default=20) + 2
+    content = max((len(_ANSI.sub("", line)) for line in ansi.split("\n")), default=20)
+    width = max(content + 2, _MIN_WIDTH)
     console = Console(record=True, width=width)
     console.print(Text.from_ansi(ansi))
     svg = OUT / f"{name}.svg"
