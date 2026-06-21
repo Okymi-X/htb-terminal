@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import argparse
 import unittest
 from typing import Any
+from unittest import mock
 
+from htb_terminal import handlers
 from htb_terminal.http import ApiError
 from htb_terminal.services.machines import MachineService
 from htb_terminal.services.payloads import machine_rows
@@ -12,17 +15,34 @@ class FakeClient:
     def __init__(self, pages: dict[str, dict[int | None, Any]]):
         self.pages = pages
         self.calls: list[tuple[str, int | None]] = []
+        self.queries: list[dict[str, Any] | None] = []
+        self.versions: list[str | None] = []
 
-    def get(self, path: str, query: dict[str, Any] | None = None) -> Any:
+    def get(
+        self,
+        path: str,
+        query: dict[str, Any] | None = None,
+        *,
+        version: str | None = None,
+    ) -> Any:
         page = query.get("page") if query else None
         self.calls.append((path, page))
+        self.queries.append(query)
+        self.versions.append(version)
         value = self.pages[path][page]
         if isinstance(value, Exception):
             raise value
         return value
 
-    def post(self, path: str, data: dict[str, Any] | None = None) -> Any:
+    def post(
+        self,
+        path: str,
+        data: dict[str, Any] | None = None,
+        *,
+        version: str | None = None,
+    ) -> Any:
         self.calls.append((path, None))
+        self.versions.append(version)
         value = self.pages[path][None]
         if isinstance(value, Exception):
             raise value
@@ -301,6 +321,30 @@ class MachineSearchTests(unittest.TestCase):
 
         self.assertEqual("expired", payload["info"]["expires_in"])
 
+    def test_todo_unreleased_and_starting_point_use_v5_machines(self) -> None:
+        payload = {"data": [{"id": 1, "name": "X"}]}
+        client = FakeClient({"/machines": {None: payload}})
+        service = MachineService(client)
+
+        self.assertEqual(payload, service.list_todo())
+        self.assertEqual(payload, service.list_unreleased())
+        self.assertEqual(payload, service.list_starting_point(1))
+
+        self.assertEqual(["v5", "v5", "v5"], client.versions)
+        self.assertEqual(
+            [{"todo": 1}, {"state": "unreleased"}, {"spTier": 1}],
+            client.queries,
+        )
+
+    def test_submit_flag_posts_to_v5_machine_own(self) -> None:
+        client = FakeClient({"/machine/own": {None: {"success": True}}})
+
+        result = MachineService(client).submit_flag("394", "flag", 3)
+
+        self.assertEqual({"success": True}, result)
+        self.assertIn(("/machine/own", None), client.calls)
+        self.assertEqual(["v5"], client.versions)
+
     def test_machine_rows_reads_play_info_state(self) -> None:
         rows = machine_rows(
             {
@@ -316,6 +360,27 @@ class MachineSearchTests(unittest.TestCase):
 
         self.assertEqual(True, rows[0]["active"])
         self.assertEqual(False, rows[0]["spawned"])
+
+
+class MachineStartHandlerTests(unittest.TestCase):
+    def test_wait_threads_interval_into_both_retry_and_ip_poll(self) -> None:
+        service = mock.Mock()
+        service.resolve_id.return_value = 912
+        service.start_with_retry.return_value = {"message": "deployed"}
+        service.wait_for_active_ip.return_value = {"name": "Nimbus", "ip": "10.129.1.2"}
+        args = argparse.Namespace(
+            target="Nimbus", mode="auto", wait=True, retry_for=360, interval=5
+        )
+
+        with mock.patch.object(handlers, "_machine_service", return_value=service):
+            result = handlers.machine_start(args, mock.Mock())
+
+        service.start_with_retry.assert_called_once_with(
+            "912", "auto", retry_for=360, interval=5
+        )
+        service.wait_for_active_ip.assert_called_once_with(912, interval=5)
+        self.assertEqual("10.129.1.2", result["ip"])
+        self.assertEqual(912, result["id"])
 
 
 if __name__ == "__main__":

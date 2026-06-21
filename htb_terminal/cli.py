@@ -30,7 +30,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except (ApiError, ConfigError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
-        if isinstance(exc, ApiError) and exc.status in (401, 403):
+        # 401 means a rejected token; 403 is usually a state/permission issue
+        # (e.g. "you already have an active instance"), so do not blame the token.
+        if isinstance(exc, ApiError) and exc.status == 401:
             print(
                 "hint: the App Token was rejected. Run 'htb init' to set a valid one,"
                 " or check HTB_API_TOKEN.",

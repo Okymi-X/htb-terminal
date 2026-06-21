@@ -119,6 +119,10 @@ Full details for each command are in the [command reference](docs/commands.md).
 ./htb machine start "BoardLight" --mode auto
 ./htb machine start 444 --mode play
 ./htb machine start 478 --mode spawn
+
+# Seasonal release: keep retrying a full spawn server, then wait for the IP.
+./htb machine start Nimbus --mode auto --wait --retry-for 360 --interval 5
+
 ./htb machine stop
 ./htb machine reset
 ./htb machine extend
@@ -189,6 +193,37 @@ Useful options:
 - `--max-pages N`: cap the number of API pages scanned per list.
 
 Without `--profiles`, the query matches machine id, name, OS, difficulty, tags, maker names, and common list fields. Use `--profiles` for terms that may only exist in the detailed machine profile, for example description text mentioning breached credentials.
+
+## Spawn a seasonal box with `--wait`
+
+When a seasonal machine drops (Saturdays 19:00 UTC) the spawn servers are full,
+so a plain `machine start` fails immediately with a capacity error. If you are
+already connected to the VPN, add `--wait` to keep retrying until a slot frees
+up and then block until the machine reports its IP:
+
+```bash
+./htb machine start Nimbus --mode auto --wait --retry-for 360 --interval 5
+```
+
+```json
+{
+  "id": 912,
+  "name": "Nimbus",
+  "ip": "10.129.1.2",
+  "spawn": { "message": "Machine deployed to lab." }
+}
+```
+
+- `--retry-for SECONDS`: total time to keep retrying the spawn (default 600).
+- `--interval SECONDS`: base delay between spawn attempts and IP-availability
+  polls; each spawn delay is jittered ±20% so simultaneous clients do not retry
+  in lockstep at the release moment.
+
+Only transient rejections are retried — capacity messages (`full`, `busy`,
+`try again`, …) and `429`/`5xx` responses, including the Release Arena's
+"Failed to spawn … Please try again." Real failures (bad token, unknown
+machine) fail fast instead of spinning for minutes. For the full hands-off flow
+that also connects the VPN and tunes the MTU, use `speedrun` below.
 
 ## Speedrun a season release
 

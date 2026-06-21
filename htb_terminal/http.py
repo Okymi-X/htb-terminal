@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -38,14 +39,20 @@ class HtbApiClient:
         self.timeout = timeout
         self.max_retries = max_retries
 
-    def get(self, path: str, query: dict[str, Any] | None = None) -> Any:
-        return self.request_json("GET", path, query=query)
+    def get(
+        self, path: str, query: dict[str, Any] | None = None, *, version: str | None = None
+    ) -> Any:
+        return self.request_json("GET", path, query=query, version=version)
 
-    def post(self, path: str, data: dict[str, Any] | None = None) -> Any:
-        return self.request_json("POST", path, data=data)
+    def post(
+        self, path: str, data: dict[str, Any] | None = None, *, version: str | None = None
+    ) -> Any:
+        return self.request_json("POST", path, data=data, version=version)
 
-    def download(self, path: str, query: dict[str, Any] | None = None) -> bytes:
-        return self.request("GET", path, query=query).body
+    def download(
+        self, path: str, query: dict[str, Any] | None = None, *, version: str | None = None
+    ) -> bytes:
+        return self.request("GET", path, query=query, version=version).body
 
     def request_json(
         self,
@@ -53,8 +60,10 @@ class HtbApiClient:
         path: str,
         data: dict[str, Any] | None = None,
         query: dict[str, Any] | None = None,
+        *,
+        version: str | None = None,
     ) -> Any:
-        response = self.request(method, path, data=data, query=query)
+        response = self.request(method, path, data=data, query=query, version=version)
         return response.json()
 
     def request(
@@ -63,8 +72,10 @@ class HtbApiClient:
         path: str,
         data: dict[str, Any] | None = None,
         query: dict[str, Any] | None = None,
+        *,
+        version: str | None = None,
     ) -> ApiResponse:
-        url = self._url(path, query)
+        url = self._url(path, query, version)
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self.token}",
@@ -106,12 +117,25 @@ class HtbApiClient:
 
         raise ApiError(429, "HTTP 429: rate limit retries exhausted")
 
-    def _url(self, path: str, query: dict[str, Any] | None = None) -> str:
+    def _url(
+        self, path: str, query: dict[str, Any] | None = None, version: str | None = None
+    ) -> str:
         clean_path = path if path.startswith("/") else f"/{path}"
-        url = f"{self.base_url}{clean_path}"
+        url = f"{self._versioned_base(version)}{clean_path}"
         if query:
             url = f"{url}?{urlencode({k: v for k, v in query.items() if v is not None})}"
         return url
+
+    def _versioned_base(self, version: str | None) -> str:
+        """Swap the trailing ``/api/vN`` segment for a per-call version.
+
+        HTB rolls out the API one version at a time, so a single command may
+        mix versions (most endpoints are v4; a few have moved to v5). Bases
+        without a recognizable version segment are returned unchanged.
+        """
+        if not version:
+            return self.base_url
+        return re.sub(r"/api/v\d+$", f"/api/{version}", self.base_url)
 
 
 def _retry_after_seconds(headers: Any) -> float | None:

@@ -10,10 +10,11 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from typing import TextIO
 
 from htb_terminal.output import color_enabled, style
+from htb_terminal.spinner import Spinner
 
 
 class StepRunner:
@@ -31,7 +32,8 @@ class StepRunner:
     def step(self, label: str) -> Iterator[None]:
         start = time.monotonic()
         try:
-            yield
+            with self._live(label):
+                yield
         except BaseException:
             self._writeln(f"  {label} ... {style('FAILED', 'red', self.enabled)}")
             raise
@@ -39,6 +41,11 @@ class StepRunner:
             elapsed = time.monotonic() - start
             status = f"ok ({elapsed:.0f}s)" if elapsed >= 1.5 else "ok"
             self._writeln(f"  {label} ... {style(status, 'green', self.enabled)}")
+
+    def _live(self, label: str) -> AbstractContextManager[object]:
+        if self.enabled and self.stream.isatty():
+            return Spinner(label, stream=self.stream)
+        return nullcontext()
 
     def _writeln(self, text: str) -> None:
         print(text, file=self.stream, flush=True)
