@@ -6,7 +6,10 @@ from unittest import mock
 
 from htb_terminal.http import ApiError
 from htb_terminal.services.machines import MachineService
-from htb_terminal.services.spawn import is_transient_spawn_error
+from htb_terminal.services.spawn import (
+    is_active_instance_conflict,
+    is_transient_spawn_error,
+)
 
 
 class SequenceClient:
@@ -43,6 +46,26 @@ class TransientSpawnErrorTests(unittest.TestCase):
     def test_other_errors_are_not_transient(self):
         self.assertFalse(is_transient_spawn_error(ApiError(401, "HTTP 401: Unauthorized")))
         self.assertFalse(is_transient_spawn_error(ApiError(404, "HTTP 404: Not found")))
+
+
+class ActiveInstanceConflictTests(unittest.TestCase):
+    def test_detects_active_instance_rejection(self):
+        self.assertTrue(
+            is_active_instance_conflict(
+                ApiError(403, "HTTP 403: You already have an active instance")
+            )
+        )
+
+    def test_ignores_capacity_and_unrelated_errors(self):
+        # A full spawn server is transient capacity, not an active-instance lock.
+        self.assertFalse(
+            is_active_instance_conflict(ApiError(403, "HTTP 403: spawn capacity full"))
+        )
+        # 409 "already active elsewhere" is the play->spawn fallback, not a lock.
+        self.assertFalse(
+            is_active_instance_conflict(ApiError(409, "HTTP 409: already active elsewhere"))
+        )
+        self.assertFalse(is_active_instance_conflict(ApiError(500, "boom")))
 
 
 class StartWithRetryTests(unittest.TestCase):
@@ -119,6 +142,26 @@ class WaitForActiveIpTests(unittest.TestCase):
             info = service.wait_for_active_ip(100, timeout=120, interval=10)
 
         self.assertEqual("10.129.1.2", info["ip"])
+
+    def test_fails_fast_when_instance_collapses(self):
+        # Seen active once, then it vanishes ("No data"): stop waiting, diagnose.
+        client = SequenceClient(
+            {
+                "/machine/active": [
+                    {"info": {"id": 100, "ip": None}},
+                    {"info": None},
+                ],
+            }
+        )
+        service = MachineService(client)
+
+        with mock.patch("htb_terminal.services.machines.time.sleep"):
+            with self.assertRaises(RuntimeError) as ctx:
+                service.wait_for_active_ip(100, timeout=120, interval=10)
+
+        self.assertIn("dropped out", str(ctx.exception))
+        # Only two polls happened — it did not burn the whole timeout.
+        self.assertEqual(2, client.calls.count("/machine/active"))
 
     def test_times_out_without_ip(self):
         client = SequenceClient({"/machine/active": [{"info": {"id": 100, "ip": None}}] * 50})

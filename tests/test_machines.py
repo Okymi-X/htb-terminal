@@ -362,6 +362,67 @@ class MachineSearchTests(unittest.TestCase):
         self.assertEqual(False, rows[0]["spawned"])
 
 
+class MachineStartConflictTests(unittest.TestCase):
+    def _service(self) -> MachineService:
+        service = MachineService(mock.Mock())
+        service.resolve_id = mock.Mock(return_value=585)
+        service.stop = mock.Mock(return_value={"message": "terminated"})
+        return service
+
+    def test_reclaims_stuck_active_instance_same_machine(self) -> None:
+        service = self._service()
+        conflict = ApiError(403, "You already have an active instance")
+        service._start_auto = mock.Mock(side_effect=[conflict, {"message": "deployed"}])
+        service.active = mock.Mock(
+            return_value={"info": {"id": 585, "name": "Pov", "ip": None}}
+        )
+
+        result = service.start("Pov", "auto")
+
+        self.assertEqual({"message": "deployed"}, result)
+        service.stop.assert_called_once_with("585")
+        self.assertEqual(2, service._start_auto.call_count)
+
+    def test_idempotent_when_same_machine_already_running(self) -> None:
+        service = self._service()
+        conflict = ApiError(403, "You already have an active instance")
+        service._start_auto = mock.Mock(side_effect=conflict)
+        service.active = mock.Mock(
+            return_value={"info": {"id": 585, "name": "Pov", "ip": "10.129.1.5"}}
+        )
+
+        result = service.start("Pov", "auto")
+
+        self.assertEqual("10.129.1.5", result["info"]["ip"])
+        service.stop.assert_not_called()
+
+    def test_refuses_to_touch_a_different_active_machine(self) -> None:
+        service = self._service()
+        conflict = ApiError(403, "You already have an active instance")
+        service._start_auto = mock.Mock(side_effect=conflict)
+        service.active = mock.Mock(
+            return_value={"info": {"id": 999, "name": "Other", "ip": "10.129.9.9"}}
+        )
+
+        with self.assertRaises(ApiError) as ctx:
+            service.start("Pov", "auto")
+
+        self.assertIn("Other", str(ctx.exception))
+        self.assertIn("id 999", str(ctx.exception))
+        service.stop.assert_not_called()
+
+    def test_non_conflict_error_is_not_swallowed(self) -> None:
+        service = self._service()
+        service._start_auto = mock.Mock(side_effect=ApiError(500, "boom"))
+        service.active = mock.Mock()
+
+        with self.assertRaises(ApiError):
+            service.start("Pov", "auto")
+
+        service.active.assert_not_called()
+        service.stop.assert_not_called()
+
+
 class MachineStartHandlerTests(unittest.TestCase):
     def test_wait_threads_interval_into_both_retry_and_ip_poll(self) -> None:
         service = mock.Mock()
@@ -378,7 +439,7 @@ class MachineStartHandlerTests(unittest.TestCase):
         service.start_with_retry.assert_called_once_with(
             "912", "auto", retry_for=360, interval=5
         )
-        service.wait_for_active_ip.assert_called_once_with(912, interval=5)
+        service.wait_for_active_ip.assert_called_once_with(912, timeout=360, interval=5)
         self.assertEqual("10.129.1.2", result["ip"])
         self.assertEqual(912, result["id"])
 

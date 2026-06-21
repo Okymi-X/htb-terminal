@@ -165,7 +165,9 @@ def _add_machine_commands(subparsers: _SubParsers, common: argparse.ArgumentPars
         type=int,
         default=600,
         metavar="SECONDS",
-        help="With --wait: keep retrying the spawn for up to this long. Default 600.",
+        help="With --wait: budget (seconds) for the whole flow — retrying the"
+        " spawn while capacity is full and then waiting for the machine IP."
+        " Default 600.",
     )
     start.add_argument(
         "--interval",

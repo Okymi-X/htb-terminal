@@ -147,8 +147,12 @@ def machine_start(args: argparse.Namespace, client: HtbApiClient) -> Any:
         retry_for=args.retry_for,
         interval=args.interval,
     )
-    # Honor --interval for the IP poll too, so the whole --wait flow uses one cadence.
-    info = service.wait_for_active_ip(machine_id, interval=args.interval)
+    # Honor --interval (cadence) and --retry-for (budget) for the IP poll too,
+    # so the whole --wait flow respects the limits the user asked for instead of
+    # a hidden 300s cap.
+    info = service.wait_for_active_ip(
+        machine_id, timeout=args.retry_for, interval=args.interval
+    )
     return {
         "id": machine_id,
         "name": info.get("name"),
