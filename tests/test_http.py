@@ -44,6 +44,21 @@ class HtbApiClientTests(unittest.TestCase):
         self.assertEqual("https://example.test/api/v4/machine/paginated?page=1", request.full_url)
         self.assertEqual("Bearer token", request.headers["Authorization"])
 
+    def test_version_override_swaps_api_segment(self):
+        with mock.patch("htb_terminal.http.urlopen", return_value=_ok_response({})) as opened:
+            self.client.get("/machines", query={"todo": 1}, version="v5")
+
+        request = opened.call_args.args[0]
+        self.assertEqual("https://example.test/api/v5/machines?todo=1", request.full_url)
+
+    def test_version_override_is_a_noop_without_a_version_segment(self):
+        client = HtbApiClient("https://example.test/custom", "token")
+        with mock.patch("htb_terminal.http.urlopen", return_value=_ok_response({})) as opened:
+            client.get("/machines", version="v5")
+
+        request = opened.call_args.args[0]
+        self.assertEqual("https://example.test/custom/machines", request.full_url)
+
     def test_retries_on_429_with_backoff_then_succeeds(self):
         payload = {"data": []}
         side_effects = [
