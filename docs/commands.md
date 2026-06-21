@@ -202,7 +202,7 @@ htb machine start Seasonal --wait
 | `--mode {auto,play,spawn}` | `auto` | Which start endpoint to use. |
 | `--wait` | off | Retry while spawn capacity is full, then wait for the machine IP. |
 | `--retry-for SECONDS` | `600` | With `--wait`: keep retrying the spawn for up to this long. |
-| `--interval SECONDS` | `15` | With `--wait`: base delay between attempts (jittered ±20%). |
+| `--interval SECONDS` | `15` | With `--wait`: base delay between spawn attempts (jittered ±20%) and between IP-availability polls. |
 
 Modes:
 
@@ -223,11 +223,15 @@ that do spawn can take a while to receive an IP. `--wait` handles both:
   not retry in lockstep. Non-transient errors (401, 404, ...) still fail
   immediately.
 - After a successful spawn, the command polls the active machine until an
-  IP is assigned (up to 5 minutes), then prints the id, name, and IP.
+  IP is assigned (up to 5 minutes, at the `--interval` cadence), then
+  prints the id, name, and IP.
 
 ```bash
 # Fire this right at the release moment and walk away:
 htb machine start Seasonal --wait --retry-for 900
+
+# Tighter cadence: retry for 6 minutes, polling every 5 seconds.
+htb machine start Nimbus --mode auto --wait --retry-for 360 --interval 5
 ```
 
 ### machine stop

@@ -16,10 +16,17 @@ import subprocess
 import sys
 from typing import Any
 
+from htb_terminal import box
 from htb_terminal.completion import completion_script
 from htb_terminal.config import load_config, save_token
 from htb_terminal.http import HtbApiClient
-from htb_terminal.output import print_json, print_pretty, print_status_line, print_table
+from htb_terminal.output import (
+    color_enabled,
+    print_json,
+    print_pretty,
+    print_status_line,
+    print_table,
+)
 from htb_terminal.services.machines import MachineService
 from htb_terminal.services.payloads import machine_rows
 from htb_terminal.services.speedrun import SpeedrunService
@@ -140,7 +147,8 @@ def machine_start(args: argparse.Namespace, client: HtbApiClient) -> Any:
         retry_for=args.retry_for,
         interval=args.interval,
     )
-    info = service.wait_for_active_ip(machine_id)
+    # Honor --interval for the IP poll too, so the whole --wait flow uses one cadence.
+    info = service.wait_for_active_ip(machine_id, interval=args.interval)
     return {
         "id": machine_id,
         "name": info.get("name"),
@@ -221,8 +229,19 @@ def speedrun(args: argparse.Namespace, client: HtbApiClient) -> Any:
     info = result.machine
     name = info.get("name") or args.target
     ip = info.get("ip")
-    print(f"ready: {name} {ip}")
-    ui.note(f"machine up on {result.interface} (mtu {result.mtu}). VPN is foreground; Ctrl-C to disconnect.")
+    enabled = color_enabled(args.color)
+    lines = box.panel(
+        [
+            f"machine   {name}",
+            f"ip        {ip}",
+            f"tunnel    {result.interface} (mtu {result.mtu})",
+        ],
+        title="ready",
+        enabled=enabled,
+    )
+    for line in lines:
+        print(line)
+    ui.note("VPN is foreground; press Ctrl-C to disconnect.")
 
     try:
         result.process.wait()
