@@ -54,6 +54,16 @@ Wherever a command takes a machine target, you can pass either a numeric id
 (`444`) or a machine name (`BoardLight`). Names are resolved through
 `/machine/profile/<name>`.
 
+### Running with sudo / privilege elevation
+
+Since commands like `speedrun` and `vpn connect` manage OpenVPN processes and network interfaces, they require `sudo` to run.
+
+* **Token Resolution**: By default, `sudo` switches the environment home directory to `/root`. If a token exists at `/root/.config/htb-terminal/token`, it will be used. If not, the client automatically falls back to looking for your token under the invoking user's home config directory (retrieved using the `SUDO_USER` environment variable, e.g. `/home/username/.config/htb-terminal/token`).
+* **Command Not Found (`htbx`)**: If you installed `htbx` via `pipx`, it resides in your user binary directory (e.g. `~/.local/bin`), which is not in `root`'s `PATH`. If `sudo htbx` fails with `command not found`, use `sudo htb` instead, or create a symlink to make it globally available under `/usr/bin`:
+  ```bash
+  sudo ln -s $(which htb) /usr/bin/htb
+  ```
+
 ---
 
 ## init

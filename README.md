@@ -259,6 +259,17 @@ It needs root (for OpenVPN and the MTU change), so run it with `sudo`. The VPN
 runs in the foreground; press Ctrl-C to disconnect. Tunables: `--mtu`,
 `--interface`, `--retry-for`, `--interval`, `--mode`, and `--variant`.
 
+### Running with Sudo & Privilege Elevation
+
+Since commands like `speedrun` and `vpn connect` manage OpenVPN processes and network interfaces, they require `sudo` to run. Here are some key behaviors and tips when running under `sudo`:
+
+* **Token Resolution**: By default, `sudo` switches the environment home directory to `/root`. If a token exists at `/root/.config/htb-terminal/token`, it will be used. If not, the client automatically falls back to looking for your token under the invoking user's home config directory (retrieved using the `SUDO_USER` environment variable, e.g. `/home/username/.config/htb-terminal/token`).
+* **Command Not Found (`htbx`)**: If you installed `htbx` via `pipx`, it resides in your user binary directory (e.g. `~/.local/bin`), which is not in `root`'s `PATH`. If `sudo htbx` fails with `command not found`, use `sudo htb` instead, or create a symlink to make it globally available under `/usr/bin`:
+  ```bash
+  sudo ln -s $(which htb) /usr/bin/htb
+  ```
+
+
 ## Shell completion
 
 Enable tab-completion for commands, subcommands, and options. The same script
