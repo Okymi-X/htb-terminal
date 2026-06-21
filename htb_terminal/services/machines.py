@@ -92,13 +92,15 @@ class MachineService:
         return self.client.get("/machine/list/retired/paginated", query={"page": page})
 
     def list_todo(self) -> Any:
-        return self.client.get("/machine/todo")
+        # The v4 /machine/todo, /machine/unreleased and /sp/tier/{tier} routes
+        # were removed; their filters now live on the unified v5 /machines.
+        return self.client.get("/machines", query={"todo": 1}, version="v5")
 
     def list_unreleased(self) -> Any:
-        return self.client.get("/machine/unreleased")
+        return self.client.get("/machines", query={"state": "unreleased"}, version="v5")
 
     def list_starting_point(self, tier: int) -> Any:
-        return self.client.get(f"/sp/tier/{tier}")
+        return self.client.get("/machines", query={"spTier": tier}, version="v5")
 
     def search(
         self,
@@ -169,8 +171,10 @@ class MachineService:
                         f"Gave up after {attempt} attempts over {retry_for}s: {exc}",
                         exc.body,
                     ) from exc
+                # Expected at peak/seasonal times, so this is progress, not a
+                # warning: the spawn server is full and we keep trying.
                 print(
-                    f"warning: spawn rejected (attempt {attempt}): {exc};"
+                    f"spawn server busy (attempt {attempt}): {exc};"
                     f" retrying in {wait:.0f}s",
                     file=sys.stderr,
                 )
@@ -217,9 +221,11 @@ class MachineService:
         return self.client.post("/vm/extend", data={"machine_id": machine_id})
 
     def submit_flag(self, target: str, flag: str, difficulty: int) -> Any:
+        # v4 /machine/own was removed; flag submission now lives on v5.
         return self.client.post(
             "/machine/own",
             data={"id": self.resolve_id(target), "flag": flag, "difficulty": difficulty},
+            version="v5",
         )
 
     def active_id(self) -> int:
