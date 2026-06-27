@@ -330,7 +330,7 @@ htb vpn servers --static       # offline alias table only
 
 | Argument / option | Default | Description |
 | --- | --- | --- |
-| `product` | `labs` | Optional positional. Which server pool to list: `labs`, `starting_point`, `competitive`, `fortresses`. |
+| `product` | `labs` | Optional positional. Which server pool to list: `labs`, `starting_point`, `competitive`, `fortresses`, `release_arena`. |
 | `--static` | off | Skip the API and show only the built-in offline aliases. |
 
 Columns: `id`, `name`, `group`, `location`, `clients`, `full`, `assigned`.

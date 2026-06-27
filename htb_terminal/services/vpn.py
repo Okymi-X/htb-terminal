@@ -11,7 +11,7 @@ from htb_terminal.services.payloads import to_int
 
 # Server pools exposed by GET /connections/servers. "labs" covers regular
 # machines including the VIP / VIP+ / dedicated pools a paid account unlocks.
-VPN_PRODUCTS = ("labs", "starting_point", "competitive", "fortresses")
+VPN_PRODUCTS = ("labs", "starting_point", "competitive", "fortresses", "release_arena")
 
 
 @dataclass(frozen=True)
