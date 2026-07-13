@@ -256,8 +256,12 @@ ready: Seasonal 10.10.11.50
 ```
 
 It needs root (for OpenVPN and the MTU change), so run it with `sudo`. The VPN
-runs in the foreground; press Ctrl-C to disconnect. Tunables: `--mtu`,
-`--interface`, `--retry-for`, `--interval`, `--mode`, and `--variant`.
+runs in the foreground; press Ctrl-C to disconnect. If Ctrl-C or an HTB API
+failure interrupts any step after OpenVPN starts, `speedrun` disconnects and
+reaps OpenVPN automatically. It also verifies that the OpenVPN process and
+tunnel interface remain active while retrying the spawn and machine IP.
+Tunables: `--mtu`, `--interface`, `--retry-for`, `--interval`, `--mode`, and
+`--variant`.
 
 ### Running with Sudo & Privilege Elevation
 

@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from htb_terminal.netcfg import ensure_root, set_mtu, start_openvpn, wait_for_interface
+from htb_terminal.netcfg import (
+    ensure_openvpn_active,
+    ensure_root,
+    set_mtu,
+    start_openvpn,
+    stop_openvpn,
+    wait_for_interface,
+)
 from htb_terminal.services.machines import MachineService
 from htb_terminal.services.vpn import VpnService
 from htb_terminal.ui import StepRunner
@@ -50,22 +57,44 @@ class SpeedrunService:
     ) -> SpeedrunResult:
         ensure_root()
         command = tuple(openvpn_command or ("openvpn",))
+        process: subprocess.Popen | None = None
 
-        with self.ui.step(f"resolve machine {target!r}"):
-            machine_id = self.machine.resolve_id(target)
-        with self.ui.step(f"switch vpn server {server}"):
-            self.vpn.switch(server)
-        with self.ui.step("download ovpn config"):
-            ovpn = self.vpn.download_ovpn(server, variant, output)
-        with self.ui.step("start openvpn"):
-            process = start_openvpn(ovpn, command=command, log_path=log_path)
-        with self.ui.step(f"wait for {interface}"):
-            wait_for_interface(interface, is_alive=lambda: process.poll() is None)
-        with self.ui.step(f"set {interface} mtu {mtu}"):
-            set_mtu(interface, mtu)
-        with self.ui.step("spawn machine"):
-            self.machine.start_with_retry(str(machine_id), mode, retry_for=retry_for, interval=interval)
-        with self.ui.step("wait for machine ip"):
-            info = self.machine.wait_for_active_ip(machine_id)
+        try:
+            with self.ui.step(f"resolve machine {target!r}"):
+                machine_id = self.machine.resolve_id(target)
+            with self.ui.step(f"switch vpn server {server}"):
+                self.vpn.switch(server)
+            with self.ui.step("download ovpn config"):
+                ovpn = self.vpn.download_ovpn(server, variant, output)
+            with self.ui.step("start openvpn"):
+                process = start_openvpn(ovpn, command=command, log_path=log_path)
+            with self.ui.step(f"wait for {interface}"):
+                wait_for_interface(interface, is_alive=lambda: process.poll() is None)
+
+            def check_vpn() -> None:
+                ensure_openvpn_active(process, interface, log_path=log_path)
+
+            with self.ui.step(f"set {interface} mtu {mtu}"):
+                check_vpn()
+                set_mtu(interface, mtu)
+            with self.ui.step("spawn machine"):
+                self.machine.start_with_retry(
+                    str(machine_id),
+                    mode,
+                    retry_for=retry_for,
+                    interval=interval,
+                    health_check=check_vpn,
+                )
+            with self.ui.step("wait for machine ip"):
+                info = self.machine.wait_for_active_ip(
+                    machine_id,
+                    health_check=check_vpn,
+                )
+            check_vpn()
+        except BaseException:
+            if process is not None:
+                self.ui.note("disconnecting VPN after interrupted or failed speedrun...")
+                stop_openvpn(process)
+            raise
 
         return SpeedrunResult(process=process, interface=interface, mtu=mtu, machine=info)

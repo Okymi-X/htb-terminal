@@ -462,7 +462,10 @@ line for each:
    `machine start --wait`).
 6. Wait for the machine IP and print it.
 
-The VPN then runs in the foreground; press Ctrl-C to disconnect.
+The VPN then runs in the foreground; press Ctrl-C to disconnect. Ctrl-C and
+HTB API failures during setup also disconnect and reap OpenVPN automatically.
+While retrying the spawn and waiting for the machine IP, `speedrun` verifies
+that both OpenVPN and the tunnel interface remain active.
 
 ```bash
 sudo htb speedrun Seasonal us-free-1

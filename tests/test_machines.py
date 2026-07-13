@@ -423,6 +423,38 @@ class MachineStartConflictTests(unittest.TestCase):
         service.stop.assert_not_called()
 
 
+class MachineHealthCheckTests(unittest.TestCase):
+    def test_start_retry_stops_before_request_when_health_check_fails(self) -> None:
+        service = MachineService(mock.Mock())
+        service.resolve_id = mock.Mock(return_value=585)
+        service.start = mock.Mock()
+
+        with self.assertRaisesRegex(RuntimeError, "VPN disconnected"):
+            service.start_with_retry(
+                "585",
+                "auto",
+                health_check=mock.Mock(
+                    side_effect=RuntimeError("VPN disconnected")
+                ),
+            )
+
+        service.start.assert_not_called()
+
+    def test_ip_poll_stops_before_request_when_health_check_fails(self) -> None:
+        service = MachineService(mock.Mock())
+        service._active_info = mock.Mock()
+
+        with self.assertRaisesRegex(RuntimeError, "VPN disconnected"):
+            service.wait_for_active_ip(
+                585,
+                health_check=mock.Mock(
+                    side_effect=RuntimeError("VPN disconnected")
+                ),
+            )
+
+        service._active_info.assert_not_called()
+
+
 class MachineStartHandlerTests(unittest.TestCase):
     def test_wait_threads_interval_into_both_retry_and_ip_poll(self) -> None:
         service = mock.Mock()

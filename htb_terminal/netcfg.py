@@ -30,13 +30,50 @@ def start_openvpn(
     args = [*command, "--config", str(config_path)]
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(log_path, "ab")
-        return subprocess.Popen(args, stdout=handle, stderr=handle)
+        with open(log_path, "ab") as handle:
+            return subprocess.Popen(args, stdout=handle, stderr=handle)
     return subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def interface_exists(name: str) -> bool:
     return Path(f"/sys/class/net/{name}").exists()
+
+
+def ensure_openvpn_active(
+    process: subprocess.Popen,
+    interface: str,
+    *,
+    exists: Callable[[str], bool] = interface_exists,
+    log_path: Path | None = None,
+) -> None:
+    return_code = process.poll()
+    if return_code is not None:
+        log_hint = f" Check {log_path}." if log_path is not None else ""
+        raise RuntimeError(
+            f"OpenVPN exited unexpectedly with code {return_code}.{log_hint}"
+        )
+    if not exists(interface):
+        raise RuntimeError(f"VPN interface {interface} is no longer active.")
+
+
+def stop_openvpn(process: subprocess.Popen, *, timeout: float = 10.0) -> None:
+    """Stop and reap an OpenVPN process, escalating when it ignores SIGTERM."""
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        process.wait()
+        return
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            process.wait()
+            return
+        process.wait()
 
 
 def wait_for_interface(

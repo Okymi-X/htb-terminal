@@ -12,7 +12,6 @@ import argparse
 import getpass
 import json
 import shlex
-import subprocess
 import sys
 from typing import Any
 
@@ -20,6 +19,7 @@ from htb_terminal import box
 from htb_terminal.completion import completion_script
 from htb_terminal.config import load_config, save_token
 from htb_terminal.http import ApiError, HtbApiClient
+from htb_terminal.netcfg import stop_openvpn
 from htb_terminal.output import (
     color_enabled,
     print_json,
@@ -238,19 +238,23 @@ def speedrun(args: argparse.Namespace, client: HtbApiClient) -> Any:
     ui = StepRunner(color=args.color)
     ui.header(f"speedrun: {args.target} via {args.server}")
     service = SpeedrunService(VpnService(client), MachineService(client), ui)
-    result = service.launch(
-        args.target,
-        args.server,
-        output=args.output,
-        variant=args.variant,
-        interface=args.interface,
-        mtu=args.mtu,
-        mode=args.mode,
-        retry_for=args.retry_for,
-        interval=args.interval,
-        openvpn_command=shlex.split(args.openvpn_command),
-        log_path=args.output.with_suffix(".log"),
-    )
+    try:
+        result = service.launch(
+            args.target,
+            args.server,
+            output=args.output,
+            variant=args.variant,
+            interface=args.interface,
+            mtu=args.mtu,
+            mode=args.mode,
+            retry_for=args.retry_for,
+            interval=args.interval,
+            openvpn_command=shlex.split(args.openvpn_command),
+            log_path=args.output.with_suffix(".log"),
+        )
+    except KeyboardInterrupt:
+        ui.note("speedrun interrupted.")
+        return None
 
     info = result.machine
     name = info.get("name") or args.target
@@ -273,11 +277,8 @@ def speedrun(args: argparse.Namespace, client: HtbApiClient) -> Any:
         result.process.wait()
     except KeyboardInterrupt:
         ui.note("disconnecting VPN...")
-        result.process.terminate()
-        try:
-            result.process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            result.process.kill()
+    finally:
+        stop_openvpn(result.process)
     return None
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import random
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 
 from htb_terminal.http import ApiError, HtbApiClient
@@ -201,6 +202,7 @@ class MachineService:
         *,
         retry_for: int = 600,
         interval: int = 15,
+        health_check: Callable[[], None] | None = None,
     ) -> Any:
         """Start a machine, retrying while spawn capacity is exhausted.
 
@@ -211,6 +213,8 @@ class MachineService:
         deadline = time.monotonic() + retry_for
         attempt = 0
         while True:
+            if health_check is not None:
+                health_check()
             attempt += 1
             try:
                 return self.start(str(machine_id), mode)
@@ -241,6 +245,7 @@ class MachineService:
         *,
         timeout: int = 300,
         interval: int = 10,
+        health_check: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Poll the active machine until it reports an IP address.
 
@@ -253,6 +258,8 @@ class MachineService:
         deadline = time.monotonic() + timeout
         seen_active = False
         while True:
+            if health_check is not None:
+                health_check()
             info = self._active_info()
             current_id = to_int(info.get("id")) if info else None
             if current_id == machine_id:
