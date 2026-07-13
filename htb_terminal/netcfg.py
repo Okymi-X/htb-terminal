@@ -7,7 +7,9 @@ probe) so the orchestration can be tested without root or a real tunnel.
 
 from __future__ import annotations
 
+import errno
 import os
+import stat
 import subprocess
 import time
 from collections.abc import Callable, Sequence
@@ -30,9 +32,36 @@ def start_openvpn(
     args = [*command, "--config", str(config_path)]
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "ab") as handle:
-            return subprocess.Popen(args, stdout=handle, stderr=handle)
-    return subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            handle = _open_private_log(log_path)
+        except OSError as exc:
+            raise RuntimeError(f"Could not securely open OpenVPN log {log_path}: {exc}") from exc
+        with handle:
+            return _spawn_openvpn(args, stdout=handle, stderr=handle)
+    return _spawn_openvpn(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _open_private_log(path: Path):
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+            raise OSError(errno.EINVAL, "log must be a single-link regular file")
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        return os.fdopen(descriptor, "ab")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _spawn_openvpn(args: list[str], **kwargs: object) -> subprocess.Popen:
+    try:
+        return subprocess.Popen(args, **kwargs)
+    except OSError as exc:
+        raise RuntimeError(f"Could not start OpenVPN command {args[0]!r}: {exc}") from exc
 
 
 def interface_exists(name: str) -> bool:
@@ -103,4 +132,16 @@ def set_mtu(
     *,
     runner: Callable[..., object] = subprocess.run,
 ) -> None:
-    runner(["ip", "link", "set", name, "mtu", str(mtu)], check=True)
+    try:
+        runner(["ip", "link", "set", name, "mtu", str(mtu)], check=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "Could not set the VPN MTU because the 'ip' command is missing. "
+            "Install iproute2 and retry."
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"Could not set {name} MTU to {mtu}; 'ip link' exited with code {exc.returncode}."
+        ) from exc
+    except OSError as exc:
+        raise RuntimeError(f"Could not set {name} MTU to {mtu}: {exc}") from exc

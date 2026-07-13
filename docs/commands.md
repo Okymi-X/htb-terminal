@@ -1,18 +1,20 @@
 # Command reference
 
 Complete reference for every `htb` command, including arguments, options,
-defaults, and the Labs v4 endpoints each command calls.
+defaults, and the Labs v4/v5 endpoints each command calls.
 
 Run `htb <command> --help` or `htb <command> <subcommand> --help` for the
 built-in help at any level.
 
 ## Global options
 
-Global options go **before** the command:
+Global options can go before the top-level command or after the runnable leaf
+command. `--version` is top-level-only and must come first:
 
 ```bash
 htb --json machine active
 htb --color never --wide machine list
+htb machine active --json
 ```
 
 | Option | Default | Description |
@@ -47,6 +49,7 @@ many pages.
 | `0` | Success. |
 | `1` | API, configuration, or input error. The message is printed to stderr as `error: ...`. |
 | `2` | No command given (help is printed). |
+| `130` | Interrupted with Ctrl-C. Cleanup still runs for managed OpenVPN processes. |
 
 ### Machine targets
 
@@ -56,13 +59,34 @@ Wherever a command takes a machine target, you can pass either a numeric id
 
 ### Running with sudo / privilege elevation
 
-Since commands like `speedrun` and `vpn connect` manage OpenVPN processes and network interfaces, they require `sudo` to run.
+`speedrun` launches OpenVPN and changes the tunnel MTU, so the whole command
+must run as root. `vpn connect` does not require the whole CLI to run as root:
+its default `sudo openvpn` command elevates only OpenVPN.
 
-* **Token Resolution**: By default, `sudo` switches the environment home directory to `/root`. If a token exists at `/root/.config/htb-terminal/token`, it will be used. If not, the client automatically falls back to looking for your token under the invoking user's home config directory (retrieved using the `SUDO_USER` environment variable, e.g. `/home/username/.config/htb-terminal/token`).
-* **Command Not Found (`htbx`)**: If you installed `htbx` via `pipx`, it resides in your user binary directory (e.g. `~/.local/bin`), which is not in `root`'s `PATH`. If `sudo htbx` fails with `command not found`, use `sudo htb` instead, or create a symlink to make it globally available under `/usr/bin`:
-  ```bash
-  sudo ln -s $(which htb) /usr/bin/htb
-  ```
+For a pipx install, resolve the executable before `sudo` so sudo's restricted
+`PATH` does not hide it:
+
+```bash
+sudo "$(command -v htb)" speedrun Seasonal us-free-1
+```
+
+For a source checkout, use `sudo ./htb speedrun ...`. Do not create a
+persistent `/usr/bin` symlink to a user-writable pipx executable.
+
+Under sudo, token lookup checks `./api.token`, root's normal config path, then
+the invoking user's `~/.config/htb-terminal/token` using `SUDO_USER`. The
+recommended setup is therefore to run `htb init` as your normal user first. If
+your token lives in a custom XDG directory, pass its expanded path explicitly:
+
+```bash
+sudo "$(command -v htb)" --token-file "$XDG_CONFIG_HOME/htb-terminal/token" \
+  speedrun Seasonal us-free-1
+```
+
+An environment-only token is normally removed by sudo. Prefer a token file; if
+needed and allowed by local sudo policy, preserve only the required variable
+with `sudo --preserve-env=HTB_API_TOKEN ...`. Preserve `HTB_API_BASE_URL` too
+only when using a custom API base.
 
 ---
 
@@ -87,8 +111,9 @@ The token is written to the user config file
 owner-only permissions. Pass the global `--token-file PATH` before `init` to
 save it somewhere else, for example `htb --token-file ./api.token init`.
 
-`init` makes no network calls and does not require an existing token. `Bearer`
-and `Authorization:` prefixes are stripped automatically before saving.
+`init` without `--check` makes no network calls and does not require an existing
+token. `--check` verifies the newly saved token. `Bearer` and `Authorization:`
+prefixes are stripped automatically before saving.
 
 ---
 
@@ -335,7 +360,8 @@ htb vpn servers --static       # offline alias table only
 
 Columns: `id`, `name`, `group`, `location`, `clients`, `full`, `assigned`.
 The assigned server sorts first. When the live fetch fails, falls back to
-the static alias table automatically.
+the static alias table automatically. `--static` needs no token and makes no
+network request.
 
 Endpoint: `GET /connections/servers?product=<product>`
 
@@ -375,6 +401,7 @@ Endpoint: `POST /connections/servers/switch/{id}`
 Download an OVPN file for a server.
 
 ```bash
+htb vpn switch us-free-1
 htb vpn download us-free-1
 htb vpn download eu-free-2 -o configs/eu.ovpn --variant 1
 ```
@@ -386,6 +413,14 @@ htb vpn download eu-free-2 -o configs/eu.ovpn --variant 1
 | `--variant N` | `0` | OVPN variant. `0` is UDP; other values select alternative protocols when HTB offers them (for example TCP). |
 
 Endpoint: `GET /access/ovpnfile/{id}/{variant}`
+
+HTB serves the configuration only for the account's currently assigned VPN
+server. Run `vpn switch` first, or use `vpn connect`, which switches before it
+downloads.
+
+Downloaded VPN configurations are written with owner-only permissions on
+platforms that support POSIX file modes, and symlink output files are refused
+where the operating system supports that protection.
 
 ### vpn connect
 
@@ -405,10 +440,10 @@ htb vpn connect eu-free-1 -o lab-vpn.ovpn --openvpn-command "sudo openvpn"
 | `--variant N` | `0` | OVPN variant. |
 | `--openvpn-command CMD` | `sudo openvpn` | Command to run; `--config <file>` is appended. |
 
-OpenVPN needs root to create the tun interface. When not running as root,
-the command must be wrapped in `sudo`, `doas`, or `pkexec` (the default
-already uses `sudo`); otherwise `vpn connect` aborts with an error before
-switching servers.
+OpenVPN needs root to create the tun interface. When the CLI is not running as
+root, the OpenVPN command must be wrapped in `sudo`, `doas`, or `pkexec` (the
+default already uses `sudo`); otherwise `vpn connect` aborts before switching
+servers. This keeps token handling and API requests unprivileged.
 
 ---
 
@@ -468,8 +503,8 @@ While retrying the spawn and waiting for the machine IP, `speedrun` verifies
 that both OpenVPN and the tunnel interface remain active.
 
 ```bash
-sudo htb speedrun Seasonal us-free-1
-sudo htb speedrun 478 us-free-1 --mtu 1280 --retry-for 1200
+sudo "$(command -v htb)" speedrun Seasonal us-free-1
+sudo "$(command -v htb)" speedrun 478 us-free-1 --mtu 1280 --retry-for 1200
 ```
 
 | Argument / option | Default | Description |
@@ -485,8 +520,12 @@ sudo htb speedrun 478 us-free-1 --mtu 1280 --retry-for 1200
 | `--interval SECONDS` | `15` | Base delay between spawn attempts (jittered ±20%). |
 | `--openvpn-command CMD` | `openvpn` | OpenVPN command; `--config <file>` is appended. |
 
-`speedrun` needs root to run OpenVPN and change the MTU, so run it with `sudo`.
-It uses the same endpoints as `vpn switch`, `vpn download`, and `machine start`.
+`speedrun` currently requires Linux, OpenVPN, and the `ip` command from
+iproute2. Verify them with `command -v openvpn ip`, and run `sudo -v` before a
+time-sensitive release if you want to cache sudo authentication. The downloaded
+configuration and sibling OpenVPN log are owner-only and refuse symlink targets
+where supported. It uses the same endpoints as `vpn switch`, `vpn download`,
+and `machine start`.
 
 ---
 

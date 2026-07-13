@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,14 +8,14 @@ dynamic = ["version"]
 description = "Terminal client for selected Hack The Box Labs API workflows."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Okymi" }]
 keywords = ["hackthebox", "htb", "cli", "pentesting", "ctf", "vpn"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -28,6 +28,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+screenshots = ["rich>=13.7,<15"]
 
 [project.urls]
 Homepage = "https://github.com/Okymi-X/htb-terminal"

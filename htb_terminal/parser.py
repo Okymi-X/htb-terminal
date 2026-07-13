@@ -18,6 +18,30 @@ from htb_terminal.services.vpn import VPN_PRODUCTS
 _SubParsers = argparse._SubParsersAction
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be at least 1")
+    return parsed
+
+
+def _non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be at least 0")
+    return parsed
+
+
+def _vpn_servers_needs_auth(args: argparse.Namespace) -> bool:
+    return not args.static
+
+
 def _add_global_arguments(parser: argparse.ArgumentParser, *, inherited: bool) -> None:
     """Add the flags accepted at every level.
 
@@ -39,7 +63,12 @@ def _add_global_arguments(parser: argparse.ArgumentParser, *, inherited: bool) -
 
     add("--token-file", type=Path, default=None, help="Read the API token from this file.")
     add("--base-url", default=None, help="Override the API base URL.")
-    add("--timeout", type=int, default=30, help="Per-request timeout in seconds. Default 30.")
+    add(
+        "--timeout",
+        type=_positive_int,
+        default=30,
+        help="Per-request timeout in seconds. Default 30.",
+    )
     add("--json", action="store_true", default=False, help="Print raw JSON responses.")
     add(
         "--color",
@@ -127,7 +156,7 @@ def _add_machine_commands(subparsers: _SubParsers, common: argparse.ArgumentPars
     active.set_defaults(handler=handlers.machine_active)
 
     list_cmd = _leaf(machine_sub, "list", common, help="List machines.")
-    list_cmd.add_argument("--page", type=int, default=None)
+    list_cmd.add_argument("--page", type=_positive_int, default=None)
     list_cmd.add_argument("--retired", action="store_true")
     list_cmd.add_argument("--todo", action="store_true")
     list_cmd.add_argument("--unreleased", action="store_true")
@@ -148,8 +177,18 @@ def _add_machine_commands(subparsers: _SubParsers, common: argparse.ArgumentPars
         action="store_true",
         help="Also fetch machine profiles and search description/profile-only fields.",
     )
-    search.add_argument("--limit", type=int, default=20, help="Maximum matching rows to print.")
-    search.add_argument("--max-pages", type=int, default=10, help="Maximum API pages to scan per list.")
+    search.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=20,
+        help="Maximum matching rows to print.",
+    )
+    search.add_argument(
+        "--max-pages",
+        type=_positive_int,
+        default=10,
+        help="Maximum API pages to scan per list.",
+    )
     search.set_defaults(handler=handlers.machine_search)
 
     start = _leaf(machine_sub, "start", common, help="Start a machine by id or name.")
@@ -163,7 +202,7 @@ def _add_machine_commands(subparsers: _SubParsers, common: argparse.ArgumentPars
     )
     start.add_argument(
         "--retry-for",
-        type=int,
+        type=_positive_int,
         default=600,
         metavar="SECONDS",
         help="With --wait: budget (seconds) for the whole flow — retrying the"
@@ -172,7 +211,7 @@ def _add_machine_commands(subparsers: _SubParsers, common: argparse.ArgumentPars
     )
     start.add_argument(
         "--interval",
-        type=int,
+        type=_positive_int,
         default=15,
         metavar="SECONDS",
         help="With --wait: base delay between spawn attempts (jittered) and between"
@@ -197,7 +236,12 @@ def _add_machine_commands(subparsers: _SubParsers, common: argparse.ArgumentPars
     submit = _leaf(machine_sub, "submit", common, help="Submit a user or root flag.")
     submit.add_argument("target")
     submit.add_argument("flag")
-    submit.add_argument("--difficulty", type=int, required=True)
+    submit.add_argument(
+        "--difficulty",
+        type=int,
+        choices=range(10, 101, 10),
+        required=True,
+    )
     submit.set_defaults(handler=handlers.machine_submit)
 
 
@@ -223,7 +267,10 @@ def _add_vpn_commands(subparsers: _SubParsers, common: argparse.ArgumentParser) 
         action="store_true",
         help="Skip the API and show only the built-in offline aliases.",
     )
-    servers.set_defaults(handler=handlers.vpn_servers)
+    servers.set_defaults(
+        handler=handlers.vpn_servers,
+        needs_auth=_vpn_servers_needs_auth,
+    )
 
     switch = _leaf(vpn_sub, "switch", common, help="Switch to a VPN server by id, alias, or name.")
     switch.add_argument("server")
@@ -232,13 +279,13 @@ def _add_vpn_commands(subparsers: _SubParsers, common: argparse.ArgumentParser) 
     download = _leaf(vpn_sub, "download", common, help="Download an OVPN file.")
     download.add_argument("server")
     download.add_argument("-o", "--output", type=Path, default=Path("lab-vpn.ovpn"))
-    download.add_argument("--variant", type=int, default=0)
+    download.add_argument("--variant", type=_non_negative_int, default=0)
     download.set_defaults(handler=handlers.vpn_download)
 
     connect = _leaf(vpn_sub, "connect", common, help="Switch, download, then run OpenVPN.")
     connect.add_argument("server")
     connect.add_argument("-o", "--output", type=Path, default=Path("lab-vpn.ovpn"))
-    connect.add_argument("--variant", type=int, default=0)
+    connect.add_argument("--variant", type=_non_negative_int, default=0)
     connect.add_argument(
         "--openvpn-command",
         default="sudo openvpn",
@@ -268,20 +315,25 @@ def _add_speedrun_command(subparsers: _SubParsers, common: argparse.ArgumentPars
     speedrun.add_argument("target", help="Machine id or name.")
     speedrun.add_argument("server", help="VPN server id, alias, or name (see 'htb vpn servers').")
     speedrun.add_argument("-o", "--output", type=Path, default=Path("lab-vpn.ovpn"))
-    speedrun.add_argument("--variant", type=int, default=0)
+    speedrun.add_argument("--variant", type=_non_negative_int, default=0)
     speedrun.add_argument("--interface", default="tun0", help="Tunnel interface to tune. Default tun0.")
-    speedrun.add_argument("--mtu", type=int, default=1300, help="MTU to set on the interface. Default 1300.")
+    speedrun.add_argument(
+        "--mtu",
+        type=_positive_int,
+        default=1300,
+        help="MTU to set on the interface. Default 1300.",
+    )
     speedrun.add_argument("--mode", choices=["auto", "play", "spawn"], default="auto")
     speedrun.add_argument(
         "--retry-for",
-        type=int,
+        type=_positive_int,
         default=900,
         metavar="SECONDS",
         help="Keep retrying the spawn for up to this long. Default 900.",
     )
     speedrun.add_argument(
         "--interval",
-        type=int,
+        type=_positive_int,
         default=15,
         metavar="SECONDS",
         help="Base delay between spawn attempts (jittered). Default 15.",

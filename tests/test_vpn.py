@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import os
+import stat
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
+from htb_terminal.http import ApiError
 from htb_terminal.services.vpn import (
+    VpnService,
     ensure_openvpn_privileges,
     resolve_server_id,
     server_rows,
@@ -26,6 +32,89 @@ class OpenvpnPrivilegeTests(unittest.TestCase):
                 ensure_openvpn_privileges(["openvpn"])
         self.assertIn("root", str(ctx.exception))
         self.assertIn("sudo openvpn", str(ctx.exception))
+
+
+class VpnFileAndProcessTests(unittest.TestCase):
+    def test_download_writes_private_config(self) -> None:
+        client = mock.Mock()
+        client.download.return_value = b"client\n"
+        service = VpnService(client)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "lab.ovpn"
+            output.write_bytes(b"old")
+            output.chmod(0o644)
+
+            service.download_ovpn("113", 0, output)
+
+            self.assertEqual(b"client\n", output.read_bytes())
+            if os.name == "posix":
+                self.assertEqual(0o600, stat.S_IMODE(output.stat().st_mode))
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "O_NOFOLLOW is unavailable")
+    def test_download_refuses_symlink_output(self) -> None:
+        client = mock.Mock()
+        client.download.return_value = b"client\n"
+        service = VpnService(client)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_bytes(b"keep")
+            output = Path(tmp) / "lab.ovpn"
+            output.symlink_to(target)
+
+            with self.assertRaisesRegex(RuntimeError, "securely write"):
+                service.download_ovpn("113", 0, output)
+
+            self.assertEqual(b"keep", target.read_bytes())
+
+    @unittest.skipUnless(hasattr(os, "link"), "hard links are unavailable")
+    def test_download_refuses_hard_link_output(self) -> None:
+        client = mock.Mock()
+        client.download.return_value = b"client\n"
+        service = VpnService(client)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_bytes(b"keep")
+            output = Path(tmp) / "lab.ovpn"
+            os.link(target, output)
+
+            with self.assertRaisesRegex(RuntimeError, "securely write"):
+                service.download_ovpn("113", 0, output)
+
+            self.assertEqual(b"keep", target.read_bytes())
+
+    def test_connect_wraps_missing_openvpn_command(self) -> None:
+        service = VpnService(mock.Mock())
+        service.switch = mock.Mock()
+        service.download_ovpn = mock.Mock(return_value=Path("lab.ovpn"))
+
+        with (
+            mock.patch("htb_terminal.services.vpn.ensure_openvpn_privileges"),
+            mock.patch(
+                "htb_terminal.services.vpn.subprocess.call",
+                side_effect=FileNotFoundError("missing"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "Could not start OpenVPN"),
+        ):
+            service.connect("113", 0, Path("lab.ovpn"), ["openvpn"])
+
+    def test_connect_returns_openvpn_exit_code(self) -> None:
+        service = VpnService(mock.Mock())
+        service.switch = mock.Mock()
+        service.download_ovpn = mock.Mock(return_value=Path("lab.ovpn"))
+
+        with (
+            mock.patch("htb_terminal.services.vpn.ensure_openvpn_privileges"),
+            mock.patch(
+                "htb_terminal.services.vpn.subprocess.call",
+                return_value=15,
+            ),
+        ):
+            code = service.connect("113", 0, Path("lab.ovpn"), ["openvpn"])
+
+        self.assertEqual(15, code)
 
 
 class ResolveServerIdTests(unittest.TestCase):
@@ -191,6 +280,13 @@ class ResolveServerTests(unittest.TestCase):
             service.resolve_server("Mars VPN 1")
         self.assertIn("Mars VPN 1", str(ctx.exception))
         self.assertIn("htb vpn servers", str(ctx.exception))
+
+    def test_live_lookup_reports_api_outage_instead_of_unknown_name(self):
+        service, client = self._service()
+        client.get.side_effect = ApiError(None, "Network error: offline")
+
+        with self.assertRaisesRegex(RuntimeError, "Could not query HTB VPN servers"):
+            service.resolve_server("US Machines VIP+ 1")
 
 
 if __name__ == "__main__":

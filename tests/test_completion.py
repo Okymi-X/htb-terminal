@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import unittest
 
 from htb_terminal.completion import COMMANDS, completion_script
+from htb_terminal.parser import build_parser
 
 
 class CompletionTests(unittest.TestCase):
@@ -21,6 +23,16 @@ class CompletionTests(unittest.TestCase):
         script = completion_script("bash")
         for sub in ("extend", "info", "active", "search"):
             self.assertIn(sub, script)
+
+    def test_completion_top_level_matches_parser(self) -> None:
+        parser = build_parser()
+        subparsers = next(
+            action
+            for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        self.assertEqual(set(subparsers.choices), set(COMMANDS))
+        self.assertIn("speedrun", completion_script("bash"))
 
     def test_unknown_shell_raises(self) -> None:
         with self.assertRaises(ValueError):

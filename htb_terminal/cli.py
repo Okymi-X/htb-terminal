@@ -21,7 +21,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         client = None
-        if getattr(args, "needs_auth", True):
+        auth_requirement = getattr(args, "needs_auth", True)
+        needs_auth = auth_requirement(args) if callable(auth_requirement) else auth_requirement
+        if needs_auth:
             config = load_config(token_file=args.token_file, base_url=args.base_url)
             client = HtbApiClient(config.base_url, config.token, timeout=args.timeout)
         result = args.handler(args, client)
@@ -39,6 +41,9 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         return 1
+    except KeyboardInterrupt:
+        print("interrupted.", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

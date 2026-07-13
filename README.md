@@ -71,6 +71,10 @@ chmod +x ./htb
 ./htb --help
 ```
 
+Only `speedrun` has host-network prerequisites: Linux, OpenVPN, and the `ip`
+command from iproute2. `vpn connect` also needs OpenVPN, but elevates only that
+process by default.
+
 ### Authentication
 
 Generate an App Token from your HTB profile settings, then save it once with
@@ -99,6 +103,9 @@ The token is resolved in this order, first match wins:
 2. `--token-file PATH`, when given.
 3. `./api.token` in the current directory (handy as a per-project override).
 4. The user config file written by `htb init`.
+
+When `speedrun` is run through sudo, lookup additionally falls back to the
+invoking user's default `~/.config/htb-terminal/token` via `SUDO_USER`.
 
 `api.token` is gitignored; never commit your token.
 
@@ -135,12 +142,12 @@ Full details for each command are in the [command reference](docs/commands.md).
 ./htb vpn servers starting_point
 ./htb vpn switch us-free-1
 ./htb vpn switch 'US Machines VIP+ 1'     # friendly names from live listing work
-./htb vpn download us-free-1 -o lab-vpn.ovpn
+./htb vpn download us-free-1 -o lab-vpn.ovpn  # download the assigned server
 ./htb vpn connect us-free-1 -o lab-vpn.ovpn
 
 # Speedrun a seasonal release: connect VPN, set MTU 1300, spawn, wait for IP.
-sudo htb speedrun Seasonal us-free-1
-sudo htb speedrun Pov 'US Machines VIP+ 1'   # live server name also works
+sudo "$(command -v htb)" speedrun Seasonal us-free-1
+sudo "$(command -v htb)" speedrun Pov 'US Machines VIP+ 1'
 
 ./htb raw GET /machine/active
 ./htb raw POST /vm/spawn --data '{"machine_id":478}'
@@ -238,8 +245,8 @@ slot frees up. `speedrun` does all of it in one command and shows a live status
 for each step:
 
 ```bash
-sudo htb speedrun Seasonal us-free-1
-sudo htb speedrun Pov 'EU Machines VIP+ 1'
+sudo "$(command -v htb)" speedrun Seasonal us-free-1
+sudo "$(command -v htb)" speedrun Pov 'EU Machines VIP+ 1'
 ```
 
 ```
@@ -252,7 +259,11 @@ speedrun: Seasonal via us-free-1
   set tun0 mtu 1300 ... ok
   spawn machine ... ok (42s)
   wait for machine ip ... ok (18s)
-ready: Seasonal 10.10.11.50
+┌─ready ────────────────────┐
+│ machine   Seasonal        │
+│ ip        10.10.11.50     │
+│ tunnel    tun0 (mtu 1300) │
+└───────────────────────────┘
 ```
 
 It needs root (for OpenVPN and the MTU change), so run it with `sudo`. The VPN
@@ -263,20 +274,31 @@ tunnel interface remain active while retrying the spawn and machine IP.
 Tunables: `--mtu`, `--interface`, `--retry-for`, `--interval`, `--mode`, and
 `--variant`.
 
-### Running with Sudo & Privilege Elevation
+### Running speedrun with sudo
 
-Since commands like `speedrun` and `vpn connect` manage OpenVPN processes and network interfaces, they require `sudo` to run. Here are some key behaviors and tips when running under `sudo`:
+`speedrun` must run as root because it starts OpenVPN and changes the tunnel
+MTU. With pipx, resolve the executable as your user before sudo applies its
+restricted `PATH`:
 
-* **Token Resolution**: By default, `sudo` switches the environment home directory to `/root`. If a token exists at `/root/.config/htb-terminal/token`, it will be used. If not, the client automatically falls back to looking for your token under the invoking user's home config directory (retrieved using the `SUDO_USER` environment variable, e.g. `/home/username/.config/htb-terminal/token`).
-* **Command Not Found (`htbx`)**: If you installed `htbx` via `pipx`, it resides in your user binary directory (e.g. `~/.local/bin`), which is not in `root`'s `PATH`. If `sudo htbx` fails with `command not found`, use `sudo htb` instead, or create a symlink to make it globally available under `/usr/bin`:
-  ```bash
-  sudo ln -s $(which htb) /usr/bin/htb
-  ```
+```bash
+command -v openvpn ip
+sudo -v
+sudo "$(command -v htb)" speedrun Seasonal us-free-1
+```
+
+Run `htb init` first as your normal user. Under sudo, the client checks the
+current `./api.token`, root's config, then the invoking user's default token via
+`SUDO_USER`. For a custom XDG location, pass `--token-file` explicitly. Avoid a
+persistent `/usr/bin` symlink to the user-writable pipx command.
+
+`vpn connect` is different: run `htb vpn connect ...` normally. Its default
+`sudo openvpn` command elevates only OpenVPN, leaving token and API work
+unprivileged.
 
 
 ## Shell completion
 
-Enable tab-completion for commands, subcommands, and options. The same script
+Enable tab-completion for commands and subcommands. The same script
 works for both the `htb` and `htbx` commands.
 
 ```bash
@@ -319,6 +341,7 @@ which renders each command's output to SVG with `rich` and screenshots it with a
 headless Chromium — no PTY needed, so it works on CI and remote boxes:
 
 ```bash
+pip install -e ".[screenshots]"
 python3 scripts/screenshots.py                 # capture all shots
 python3 scripts/screenshots.py vpn-servers speedrun   # capture a subset
 ```

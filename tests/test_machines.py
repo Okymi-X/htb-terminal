@@ -465,7 +465,10 @@ class MachineStartHandlerTests(unittest.TestCase):
             target="Nimbus", mode="auto", wait=True, retry_for=360, interval=5
         )
 
-        with mock.patch.object(handlers, "_machine_service", return_value=service):
+        with (
+            mock.patch.object(handlers, "_machine_service", return_value=service),
+            mock.patch.object(handlers.time, "monotonic", side_effect=[100, 100]),
+        ):
             result = handlers.machine_start(args, mock.Mock())
 
         service.start_with_retry.assert_called_once_with(
@@ -474,6 +477,23 @@ class MachineStartHandlerTests(unittest.TestCase):
         service.wait_for_active_ip.assert_called_once_with(912, timeout=360, interval=5)
         self.assertEqual("10.129.1.2", result["ip"])
         self.assertEqual(912, result["id"])
+
+    def test_wait_uses_remaining_whole_flow_budget_for_ip_poll(self) -> None:
+        service = mock.Mock()
+        service.resolve_id.return_value = 912
+        service.start_with_retry.return_value = {"message": "deployed"}
+        service.wait_for_active_ip.return_value = {"name": "Nimbus", "ip": "10.129.1.2"}
+        args = argparse.Namespace(
+            target="Nimbus", mode="auto", wait=True, retry_for=360, interval=5
+        )
+
+        with (
+            mock.patch.object(handlers, "_machine_service", return_value=service),
+            mock.patch.object(handlers.time, "monotonic", side_effect=[100, 160]),
+        ):
+            handlers.machine_start(args, mock.Mock())
+
+        service.wait_for_active_ip.assert_called_once_with(912, timeout=300, interval=5)
 
 
 if __name__ == "__main__":

@@ -5,9 +5,9 @@ Pipeline: capture a command's ANSI output -> render it to SVG with ``rich``
 -> screenshot the SVG to PNG with a headless Chromium. This needs no PTY, so it
 works on headless boxes and CI where terminal-recording tools cannot run.
 
-Requirements: ``rich`` (already a tabletop dependency-free import here) and a
-Chromium/Chrome binary on PATH. Machine shots need a saved token (``htb init``)
-and, ideally, an active machine.
+Requirements: the project's ``screenshots`` extra and a Chromium/Chrome binary
+on PATH. Machine shots need a saved token (``htb init``) and, ideally, an
+active machine.
 
     python3 scripts/screenshots.py                 # all shots
     python3 scripts/screenshots.py vpn-servers      # a subset

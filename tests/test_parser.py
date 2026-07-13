@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 
 from htb_terminal.parser import build_parser
 
@@ -32,6 +34,23 @@ class GlobalFlagInheritanceTests(unittest.TestCase):
         args = build_parser().parse_args(["vpn", "switch", "eu-free-1", "--wide"])
         self.assertTrue(args.wide)
         self.assertEqual("eu-free-1", args.server)
+
+    def test_rejects_invalid_numeric_options_during_parsing(self) -> None:
+        invalid_commands = (
+            ["--timeout", "0", "machine", "list"],
+            ["machine", "list", "--page", "0"],
+            ["machine", "search", "x", "--limit", "0"],
+            ["machine", "start", "1", "--wait", "--interval", "0"],
+            ["machine", "submit", "1", "flag", "--difficulty", "15"],
+            ["vpn", "download", "1", "--variant", "-1"],
+            ["speedrun", "1", "1", "--mtu", "0"],
+        )
+
+        for command in invalid_commands:
+            with self.subTest(command=command), redirect_stderr(StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    build_parser().parse_args(command)
+                self.assertEqual(2, ctx.exception.code)
 
 
 if __name__ == "__main__":

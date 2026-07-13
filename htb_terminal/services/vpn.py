@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import errno
 import os
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from htb_terminal.http import HtbApiClient
+from htb_terminal.http import ApiError, HtbApiClient
 from htb_terminal.services.payloads import to_int
 
 # Server pools exposed by GET /connections/servers. "labs" covers regular
@@ -57,7 +59,7 @@ class VpnService:
         server_id = self.resolve_server(server)
         content = self.client.download(f"/access/ovpnfile/{server_id}/{variant}")
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(content)
+        _write_private_file(output, content)
         return output
 
     def resolve_server(self, value: str) -> int:
@@ -80,15 +82,24 @@ class VpnService:
     def _resolve_server_by_name(self, name: str) -> int:
         """Search the live server listing across all products for *name*."""
         needle = name.strip().lower()
+        lookup_errors: list[ApiError] = []
+        successful_lookup = False
         for product in VPN_PRODUCTS:
             try:
                 rows = server_rows(self.list_servers(product))
-            except Exception:
+            except ApiError as exc:
+                lookup_errors.append(exc)
                 continue
+            successful_lookup = True
             for row in rows:
                 friendly = (row.get("name") or "").lower()
                 if friendly == needle:
                     return row["id"]
+        if not successful_lookup and lookup_errors:
+            last_error = lookup_errors[-1]
+            raise RuntimeError(
+                f"Could not query HTB VPN servers while resolving {name!r}: {last_error}"
+            ) from last_error
         known = ", ".join(sorted(KNOWN_VPN_SERVERS))
         raise RuntimeError(
             f"Unknown VPN server {name!r}. Not a numeric ID, known alias, or "
@@ -107,7 +118,34 @@ class VpnService:
         self.switch(server)
         ovpn_path = self.download_ovpn(server, variant, output)
         command = [*openvpn_command, "--config", str(ovpn_path)]
-        return subprocess.call(command)
+        try:
+            return subprocess.call(command)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Could not start OpenVPN command {openvpn_command[0]!r}: {exc}"
+            ) from exc
+
+
+def _write_private_file(path: Path, content: bytes) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+            raise OSError(errno.EINVAL, "output must be a single-link regular file")
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        os.ftruncate(descriptor, 0)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = None
+            handle.write(content)
+    except OSError as exc:
+        raise RuntimeError(f"Could not securely write VPN config {path}: {exc}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def ensure_openvpn_privileges(command: list[str]) -> None:
@@ -203,4 +241,3 @@ def server_rows(payload: Any) -> list[dict[str, Any]]:
 
     rows.sort(key=lambda r: (not r["assigned"], r["group"] or "", r["id"]))
     return rows
-

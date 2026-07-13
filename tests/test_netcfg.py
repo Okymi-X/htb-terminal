@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import stat
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -8,6 +11,7 @@ from unittest import mock
 from htb_terminal.netcfg import (
     ensure_openvpn_active,
     set_mtu,
+    start_openvpn,
     stop_openvpn,
     wait_for_interface,
 )
@@ -68,6 +72,63 @@ class WaitForInterfaceTests(unittest.TestCase):
 
 
 class OpenvpnLifecycleTests(unittest.TestCase):
+    def test_start_openvpn_writes_private_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "openvpn.log"
+            log.write_bytes(b"old")
+            log.chmod(0o644)
+
+            with mock.patch("htb_terminal.netcfg.subprocess.Popen") as popen:
+                start_openvpn(Path("lab.ovpn"), log_path=log)
+
+            popen.assert_called_once()
+            if os.name == "posix":
+                self.assertEqual(0o600, stat.S_IMODE(log.stat().st_mode))
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "O_NOFOLLOW is unavailable")
+    def test_start_openvpn_refuses_symlink_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_bytes(b"keep")
+            log = Path(tmp) / "openvpn.log"
+            log.symlink_to(target)
+
+            with (
+                mock.patch("htb_terminal.netcfg.subprocess.Popen") as popen,
+                self.assertRaisesRegex(RuntimeError, "securely open"),
+            ):
+                start_openvpn(Path("lab.ovpn"), log_path=log)
+
+            popen.assert_not_called()
+            self.assertEqual(b"keep", target.read_bytes())
+
+    @unittest.skipUnless(hasattr(os, "link"), "hard links are unavailable")
+    def test_start_openvpn_refuses_hard_link_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_bytes(b"keep")
+            log = Path(tmp) / "openvpn.log"
+            os.link(target, log)
+
+            with (
+                mock.patch("htb_terminal.netcfg.subprocess.Popen") as popen,
+                self.assertRaisesRegex(RuntimeError, "securely open"),
+            ):
+                start_openvpn(Path("lab.ovpn"), log_path=log)
+
+            popen.assert_not_called()
+            self.assertEqual(b"keep", target.read_bytes())
+
+    def test_start_openvpn_wraps_missing_command(self) -> None:
+        with (
+            mock.patch(
+                "htb_terminal.netcfg.subprocess.Popen",
+                side_effect=FileNotFoundError("missing"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "Could not start OpenVPN"),
+        ):
+            start_openvpn(Path("lab.ovpn"))
+
     def test_active_requires_running_process_and_interface(self) -> None:
         process = mock.Mock()
         process.poll.return_value = None
@@ -130,6 +191,26 @@ class OpenvpnLifecycleTests(unittest.TestCase):
 
         process.terminate.assert_not_called()
         process.wait.assert_not_called()
+
+
+class SetMtuFailureTests(unittest.TestCase):
+    def test_missing_ip_command_has_install_hint(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "Install iproute2"):
+            set_mtu(
+                "tun0",
+                1300,
+                runner=mock.Mock(side_effect=FileNotFoundError("missing")),
+            )
+
+    def test_ip_command_failure_reports_exit_code(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "code 2"):
+            set_mtu(
+                "tun0",
+                1300,
+                runner=mock.Mock(
+                    side_effect=subprocess.CalledProcessError(2, ["ip"])
+                ),
+            )
 
 
 if __name__ == "__main__":

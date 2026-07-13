@@ -99,7 +99,8 @@ class HtbApiClient:
                     )
             except HTTPError as exc:
                 if exc.code == 429 and attempt < self.max_retries:
-                    wait = _retry_after_seconds(exc.headers) or backoff
+                    retry_after = _retry_after_seconds(exc.headers)
+                    wait = backoff if retry_after is None else retry_after
                     print(
                         f"warning: rate limited (HTTP 429), retrying in {wait:.0f}s"
                         f" [{attempt + 1}/{self.max_retries}]",
@@ -114,6 +115,8 @@ class HtbApiClient:
                 raise ApiError(exc.code, message, parsed) from exc
             except URLError as exc:
                 raise ApiError(None, f"Network error: {exc.reason}") from exc
+            except TimeoutError as exc:
+                raise ApiError(None, f"Network timeout after {self.timeout}s") from exc
 
         raise ApiError(429, "HTTP 429: rate limit retries exhausted")
 
@@ -167,4 +170,3 @@ def _error_message(status: int, parsed: Any | None, raw: bytes) -> str:
         if text:
             return f"HTTP {status}: {text[:500]}"
     return f"HTTP {status}"
-

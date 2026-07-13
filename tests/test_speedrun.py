@@ -154,17 +154,16 @@ class SpeedrunHandlerTests(unittest.TestCase):
             color="never",
         )
 
-    def test_ctrl_c_during_launch_is_handled_after_service_cleanup(self) -> None:
+    def test_ctrl_c_during_launch_propagates_after_service_cleanup(self) -> None:
         service = mock.Mock()
         service.launch.side_effect = KeyboardInterrupt
 
         with (
             mock.patch.object(handlers, "SpeedrunService", return_value=service),
             redirect_stdout(io.StringIO()),
+            self.assertRaises(KeyboardInterrupt),
         ):
-            result = handlers.speedrun(self._args(), mock.Mock())
-
-        self.assertIsNone(result)
+            handlers.speedrun(self._args(), mock.Mock())
 
     def test_ctrl_c_while_foreground_stops_openvpn(self) -> None:
         process = mock.Mock()
@@ -181,10 +180,10 @@ class SpeedrunHandlerTests(unittest.TestCase):
             mock.patch.object(handlers, "SpeedrunService", return_value=service),
             mock.patch.object(handlers, "stop_openvpn") as stop,
             redirect_stdout(io.StringIO()),
+            self.assertRaises(KeyboardInterrupt),
         ):
-            result = handlers.speedrun(self._args(), mock.Mock())
+            handlers.speedrun(self._args(), mock.Mock())
 
-        self.assertIsNone(result)
         stop.assert_called_once_with(process)
 
 

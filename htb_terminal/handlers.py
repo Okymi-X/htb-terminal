@@ -11,8 +11,10 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import math
 import shlex
 import sys
+import time
 from typing import Any
 
 from htb_terminal import box
@@ -141,6 +143,7 @@ def machine_start(args: argparse.Namespace, client: HtbApiClient) -> Any:
         return service.start(args.target, args.mode)
 
     machine_id = service.resolve_id(args.target)
+    deadline = time.monotonic() + args.retry_for
     result = service.start_with_retry(
         str(machine_id),
         args.mode,
@@ -151,7 +154,9 @@ def machine_start(args: argparse.Namespace, client: HtbApiClient) -> Any:
     # so the whole --wait flow respects the limits the user asked for instead of
     # a hidden 300s cap.
     info = service.wait_for_active_ip(
-        machine_id, timeout=args.retry_for, interval=args.interval
+        machine_id,
+        timeout=max(0, math.ceil(deadline - time.monotonic())),
+        interval=args.interval,
     )
     return {
         "id": machine_id,
@@ -238,23 +243,19 @@ def speedrun(args: argparse.Namespace, client: HtbApiClient) -> Any:
     ui = StepRunner(color=args.color)
     ui.header(f"speedrun: {args.target} via {args.server}")
     service = SpeedrunService(VpnService(client), MachineService(client), ui)
-    try:
-        result = service.launch(
-            args.target,
-            args.server,
-            output=args.output,
-            variant=args.variant,
-            interface=args.interface,
-            mtu=args.mtu,
-            mode=args.mode,
-            retry_for=args.retry_for,
-            interval=args.interval,
-            openvpn_command=shlex.split(args.openvpn_command),
-            log_path=args.output.with_suffix(".log"),
-        )
-    except KeyboardInterrupt:
-        ui.note("speedrun interrupted.")
-        return None
+    result = service.launch(
+        args.target,
+        args.server,
+        output=args.output,
+        variant=args.variant,
+        interface=args.interface,
+        mtu=args.mtu,
+        mode=args.mode,
+        retry_for=args.retry_for,
+        interval=args.interval,
+        openvpn_command=shlex.split(args.openvpn_command),
+        log_path=args.output.with_suffix(".log"),
+    )
 
     info = result.machine
     name = info.get("name") or args.target
@@ -277,6 +278,7 @@ def speedrun(args: argparse.Namespace, client: HtbApiClient) -> Any:
         result.process.wait()
     except KeyboardInterrupt:
         ui.note("disconnecting VPN...")
+        raise
     finally:
         stop_openvpn(result.process)
     return None

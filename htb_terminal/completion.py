@@ -1,8 +1,8 @@
-"""Shell completion scripts, generated from one command map.
+"""Shell completion scripts generated from a compact command map.
 
 ``htb completion bash`` / ``htb completion zsh`` print a script to source. The
-map below is the single source of truth so completions cannot drift from the
-parser.
+parser/completion parity test keeps this map aligned with the registered
+top-level commands.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ COMMANDS: dict[str, list[str]] = {
     ],
     "vpn": ["servers", "switch", "download", "connect"],
     "user": ["info"],
+    "speedrun": [],
     "raw": ["GET", "POST", "PUT", "PATCH", "DELETE"],
     "completion": ["bash", "zsh"],
 }

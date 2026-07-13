@@ -89,6 +89,27 @@ class HtbApiClientTests(unittest.TestCase):
 
         sleep.assert_called_once_with(7.0)
 
+    def test_429_honors_zero_retry_after_header(self):
+        side_effects = [
+            _http_error(429, headers={"Retry-After": "0"}),
+            _ok_response({}),
+        ]
+        with (
+            mock.patch("htb_terminal.http.urlopen", side_effect=side_effects),
+            mock.patch("htb_terminal.http.time.sleep") as sleep,
+        ):
+            self.client.get("/machine/active")
+
+        sleep.assert_called_once_with(0.0)
+
+    def test_timeout_is_wrapped_as_api_error(self):
+        with mock.patch("htb_terminal.http.urlopen", side_effect=TimeoutError):
+            with self.assertRaises(ApiError) as ctx:
+                self.client.get("/machine/active")
+
+        self.assertIsNone(ctx.exception.status)
+        self.assertIn("timeout", str(ctx.exception).lower())
+
     def test_429_raises_after_retries_exhausted(self):
         with (
             mock.patch("htb_terminal.http.urlopen", side_effect=_http_error(429)) as opened,
