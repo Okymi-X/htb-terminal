@@ -18,6 +18,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Verify release before building
+        run: |
+          python -m pip install '.[dev]'
+          ruff check .
+          pytest -q
+      - name: Check tag matches package version
+        if: github.ref_type == 'tag'
+        run: |
+          python -c 'import os; from htb_terminal import __version__; assert os.environ["GITHUB_REF_NAME"] == f"v{__version__}", "Release tag does not match package version"'
       - name: Build sdist and wheel
         run: |
           python -m pip install --upgrade build

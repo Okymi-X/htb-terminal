@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from htb_terminal.files import write_private_file
+
 DEFAULT_BASE_URL = "https://labs.hackthebox.com/api/v4"
 
 
@@ -38,11 +40,7 @@ def save_token(token: str, token_file: Path | None = None) -> Path:
     normalized = _normalize_token(token)
     path = token_file or user_token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(normalized + "\n", encoding="utf-8")
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
+    write_private_file(path, (normalized + "\n").encode("utf-8"))
     return path
 
 
@@ -92,7 +90,10 @@ def load_token(token_file: Path | None = None) -> str:
             "put it in ./api.token, or export HTB_API_TOKEN."
         )
 
-    raw = path.read_text(encoding="utf-8").strip()
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise ConfigError(f"Could not read token file {path}: {exc}") from exc
     if not raw:
         raise ConfigError(f"Token file is empty: {path}")
 
@@ -114,8 +115,12 @@ def _normalize_token(value: str) -> str:
     if token.lower().startswith("authorization:"):
         token = token.split(":", 1)[1].strip()
 
+    if token.lower() == "bearer":
+        raise ConfigError("Empty API token.")
     if token.lower().startswith("bearer "):
         token = token.split(None, 1)[1].strip()
 
+    if not token or any(character.isspace() for character in token):
+        raise ConfigError("API token must be a non-empty value without whitespace.")
     return token
 

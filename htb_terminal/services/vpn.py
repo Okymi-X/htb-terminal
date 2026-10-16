@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import errno
 import os
-import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from htb_terminal.files import write_private_file
 from htb_terminal.http import ApiError, HtbApiClient
 from htb_terminal.services.payloads import to_int
 
@@ -55,11 +54,50 @@ class VpnService:
         """
         return self.client.get("/connections/servers", query={"product": product})
 
+    def validate_server(self, server: str) -> int:
+        """Require a selectable live server before changing the account's VPN."""
+        server_id = self.resolve_server(server)
+        lookup_errors: list[ApiError] = []
+        for product in VPN_PRODUCTS:
+            try:
+                payload = self.list_servers(product)
+            except ApiError as exc:
+                lookup_errors.append(exc)
+                continue
+            # An assigned server can outlive its availability in the options.
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(data, dict) or not isinstance(data.get("options"), dict):
+                raise RuntimeError("Could not read live VPN server options from HTB.")
+            rows = server_rows({"data": {"options": data["options"]}})
+            if any(row["id"] == server_id for row in rows):
+                return server_id
+        if lookup_errors:
+            raise RuntimeError(
+                f"Could not verify availability of VPN server {server_id}: {lookup_errors[-1]}"
+            ) from lookup_errors[-1]
+        raise RuntimeError(
+            f"VPN server {server_id} is not available in your live HTB server options. "
+            "It may be disabled or unavailable for your account. "
+            "Use 'htb vpn servers' to choose a current server ID or name."
+        )
+
     def download_ovpn(self, server: str, variant: int, output: Path) -> Path:
         server_id = self.resolve_server(server)
-        content = self.client.download(f"/access/ovpnfile/{server_id}/{variant}")
+        try:
+            content = self.client.download(f"/access/ovpnfile/{server_id}/{variant}")
+        except ApiError as exc:
+            if "the selected vpn_server is disabled" not in str(exc).lower():
+                raise
+            raise ApiError(
+                exc.status,
+                f"VPN server {server_id} is disabled by HTB; the VPN config could not be generated. "
+                "A successful switch does not guarantee the server is available. "
+                "Use 'htb vpn servers' or 'htb vpn servers release_arena' to list live servers, "
+                "then retry with another server ID or name.",
+                exc.body,
+            ) from exc
         output.parent.mkdir(parents=True, exist_ok=True)
-        _write_private_file(output, content)
+        write_private_file(output, content)
         return output
 
     def resolve_server(self, value: str) -> int:
@@ -115,6 +153,7 @@ class VpnService:
         openvpn_command: list[str],
     ) -> int:
         ensure_openvpn_privileges(openvpn_command)
+        self.validate_server(server)
         self.switch(server)
         ovpn_path = self.download_ovpn(server, variant, output)
         command = [*openvpn_command, "--config", str(ovpn_path)]
@@ -124,28 +163,6 @@ class VpnService:
             raise RuntimeError(
                 f"Could not start OpenVPN command {openvpn_command[0]!r}: {exc}"
             ) from exc
-
-
-def _write_private_file(path: Path, content: bytes) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    descriptor: int | None = None
-    try:
-        descriptor = os.open(path, flags, 0o600)
-        file_stat = os.fstat(descriptor)
-        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
-            raise OSError(errno.EINVAL, "output must be a single-link regular file")
-        if hasattr(os, "fchmod"):
-            os.fchmod(descriptor, 0o600)
-        os.ftruncate(descriptor, 0)
-        with os.fdopen(descriptor, "wb") as handle:
-            descriptor = None
-            handle.write(content)
-    except OSError as exc:
-        raise RuntimeError(f"Could not securely write VPN config {path}: {exc}") from exc
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
 
 
 def ensure_openvpn_privileges(command: list[str]) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -78,6 +79,54 @@ class TokenLoadingTests(unittest.TestCase):
 
 
 class SaveTokenTests(unittest.TestCase):
+    def test_saved_token_has_private_permissions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "token"
+            target.write_text("old")
+            target.chmod(0o644)
+            save_token("secret", target)
+            if os.name == "posix":
+                self.assertEqual(0o600, stat.S_IMODE(target.stat().st_mode))
+
+    @unittest.skipUnless(hasattr(os, "fchmod"), "fchmod is unavailable")
+    def test_save_fails_before_overwrite_if_permissions_cannot_be_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "token"
+            target.write_text("keep")
+            with (
+                mock.patch("htb_terminal.files.os.fchmod", side_effect=PermissionError("denied")),
+                self.assertRaisesRegex(RuntimeError, "securely write"),
+            ):
+                save_token("secret", target)
+            self.assertEqual("keep", target.read_text())
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "O_NOFOLLOW is unavailable")
+    def test_save_rejects_symlink_without_changing_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_text("keep")
+            link = Path(tmp) / "token"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError, "securely write"):
+                save_token("secret", link)
+            self.assertEqual("keep", target.read_text())
+
+    @unittest.skipUnless(hasattr(os, "link"), "hard links are unavailable")
+    def test_save_rejects_hard_link_without_changing_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_text("keep")
+            link = Path(tmp) / "token"
+            os.link(target, link)
+            with self.assertRaisesRegex(RuntimeError, "securely write"):
+                save_token("secret", link)
+            self.assertEqual("keep", target.read_text())
+
+    def test_save_rejects_empty_bearer_and_embedded_whitespace(self):
+        for token in ("Bearer ", "Authorization: ", "abc\ndef", "abc def"):
+            with self.subTest(token=token), self.assertRaises(ConfigError):
+                save_token(token)
+
     def test_save_writes_to_user_config_and_normalizes(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict("os.environ", {"XDG_CONFIG_HOME": tmp}, clear=True):

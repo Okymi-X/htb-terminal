@@ -97,6 +97,10 @@ htb init --token "$MY_TOKEN"
 echo "$MY_TOKEN" | htb init
 ```
 
+Token writes reject symbolic links, hard links, and non-regular files, and fail
+if private permissions cannot be applied. Empty tokens and embedded whitespace
+are rejected before saving.
+
 The token is resolved in this order, first match wins:
 
 1. `HTB_API_TOKEN` environment variable.

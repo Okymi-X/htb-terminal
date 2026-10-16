@@ -363,6 +363,9 @@ The assigned server sorts first. When the live fetch fails, falls back to
 the static alias table automatically. `--static` needs no token and makes no
 network request.
 
+A successful live response with no servers remains empty; it does not show
+static aliases as if they were available in the requested pool.
+
 Endpoint: `GET /connections/servers?product=<product>`
 
 Built-in aliases (always available, also shown with `--static`):
@@ -424,9 +427,9 @@ where the operating system supports that protection.
 
 ### vpn connect
 
-Switch to a server, download its OVPN file, then run OpenVPN with it — the
-three steps in one command. Prints the OpenVPN exit code when the process
-ends.
+Check that a server is selectable, switch to it, download its OVPN file, then
+run OpenVPN with it. Prints the exit code on success and reports an error
+with a failing CLI exit status when OpenVPN exits unsuccessfully.
 
 ```bash
 htb vpn connect us-free-1
@@ -490,7 +493,8 @@ capacity fills instantly. It runs these steps with a live, emoji-free status
 line for each:
 
 1. Resolve the machine id.
-2. Switch your account to the VPN server and download its OVPN file.
+2. Check the server against live selectable options, switch your account to it,
+   and download its OVPN file.
 3. Start OpenVPN and wait for the tunnel interface to come up.
 4. Set the interface MTU (default 1300).
 5. Spawn the machine, retrying capacity rejections (same logic as
@@ -501,6 +505,16 @@ The VPN then runs in the foreground; press Ctrl-C to disconnect. Ctrl-C and
 HTB API failures during setup also disconnect and reap OpenVPN automatically.
 While retrying the spawn and waiting for the machine IP, `speedrun` verifies
 that both OpenVPN and the tunnel interface remain active.
+
+`speedrun` and `vpn connect` reject servers missing from the live selectable
+options before switching your account. A stale assigned server is not sufficient.
+HTB can still disable a server between this check and config generation; that
+failure includes recovery instructions. List current servers with `htb vpn servers`
+and rerun with another server ID or name. Product filters can return the same
+server pool, depending on HTB availability and account access; a `release_arena`
+listing does not guarantee a dedicated release server. No OpenVPN process or
+machine spawn is started when config generation fails. A nonzero OpenVPN exit
+causes both `speedrun` and `vpn connect` to exit with an error.
 
 ```bash
 sudo "$(command -v htb)" speedrun Seasonal us-free-1

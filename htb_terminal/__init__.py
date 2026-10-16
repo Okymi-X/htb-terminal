@@ -1,3 +1,3 @@
 """Terminal tooling for selected Hack The Box Labs API workflows."""
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"

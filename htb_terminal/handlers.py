@@ -194,7 +194,7 @@ def vpn_servers(args: argparse.Namespace, client: HtbApiClient) -> Any:
                 file=sys.stderr,
             )
             rows = []
-        if rows:
+        else:
             if args.json:
                 return payload
             print_table(
@@ -224,6 +224,8 @@ def vpn_download(args: argparse.Namespace, client: HtbApiClient) -> Any:
 def vpn_connect(args: argparse.Namespace, client: HtbApiClient) -> Any:
     command = shlex.split(args.openvpn_command)
     code = _vpn_service(client).connect(args.server, args.variant, args.output, command)
+    if code != 0:
+        raise RuntimeError(f"OpenVPN exited with code {code}.")
     return {"exit_code": code}
 
 
@@ -275,7 +277,9 @@ def speedrun(args: argparse.Namespace, client: HtbApiClient) -> Any:
     ui.note("VPN is foreground; press Ctrl-C to disconnect.")
 
     try:
-        result.process.wait()
+        code = result.process.wait()
+        if code != 0:
+            raise RuntimeError(f"OpenVPN exited with code {code}. Check {args.output.with_suffix('.log')}.")
     except KeyboardInterrupt:
         ui.note("disconnecting VPN...")
         raise

@@ -18,6 +18,10 @@ class FakeVpn:
     def __init__(self) -> None:
         self.calls: list[Any] = []
 
+    def validate_server(self, server: str) -> int:
+        self.calls.append(("validate", server))
+        return 113
+
     def switch(self, server: str) -> Any:
         self.calls.append(("switch", server))
 
@@ -98,7 +102,8 @@ class SpeedrunLaunchTests(unittest.TestCase):
         self.assertEqual(1300, result.mtu)
         self.assertEqual([("tun0", 1300)], mtu_calls)
         # VPN switched + downloaded, machine resolved + spawned + polled.
-        self.assertEqual(("switch", "us-free-1"), vpn.calls[0])
+        self.assertEqual(("validate", "us-free-1"), vpn.calls[0])
+        self.assertEqual(("switch", "us-free-1"), vpn.calls[1])
         self.assertEqual(("resolve", "Seasonal"), machine.calls[0])
         self.assertIn(("spawn", "478", "auto", 900, 15), machine.calls)
         self.assertIn(("wait_ip", 478), machine.calls)
@@ -106,6 +111,36 @@ class SpeedrunLaunchTests(unittest.TestCase):
     def test_launch_runs_without_error(self) -> None:
         _vpn, _machine, _mtu, result = self._run()
         self.assertEqual("Seasonal", result.machine["name"])
+
+    def test_download_failure_does_not_start_openvpn_or_spawn(self) -> None:
+        vpn, machine = FakeVpn(), FakeMachine()
+        vpn.download_ovpn = mock.Mock(side_effect=RuntimeError("VPN server 267 is disabled by HTB"))
+        service = SpeedrunService(vpn, machine, StepRunner(color="never", stream=io.StringIO()))
+
+        with (
+            mock.patch("htb_terminal.services.speedrun.ensure_root"),
+            mock.patch("htb_terminal.services.speedrun.start_openvpn") as start,
+            mock.patch("htb_terminal.services.speedrun.stop_openvpn") as stop,
+            self.assertRaisesRegex(RuntimeError, "disabled by HTB"),
+        ):
+            service.launch("Management", "267", output=Path("lab-vpn.ovpn"))
+
+        start.assert_not_called()
+        stop.assert_not_called()
+        self.assertEqual([("resolve", "Management")], machine.calls)
+
+    def test_unavailable_server_fails_before_switch(self) -> None:
+        vpn, machine = FakeVpn(), FakeMachine()
+        vpn.validate_server = mock.Mock(side_effect=RuntimeError("267 is not available"))
+        service = SpeedrunService(vpn, machine, StepRunner(color="never", stream=io.StringIO()))
+        with (
+            mock.patch("htb_terminal.services.speedrun.ensure_root"),
+            mock.patch("htb_terminal.services.speedrun.start_openvpn") as start,
+            self.assertRaisesRegex(RuntimeError, "267 is not available"),
+        ):
+            service.launch("Management", "267", output=Path("lab-vpn.ovpn"))
+        self.assertEqual([], vpn.calls)
+        start.assert_not_called()
 
     def test_launch_stops_openvpn_after_failure_or_interrupt(self) -> None:
         for failure in (RuntimeError("HTB connection failed"), KeyboardInterrupt()):
@@ -184,6 +219,23 @@ class SpeedrunHandlerTests(unittest.TestCase):
         ):
             handlers.speedrun(self._args(), mock.Mock())
 
+        stop.assert_called_once_with(process)
+
+    def test_foreground_openvpn_failure_is_reported_and_cleaned_up(self) -> None:
+        process = mock.Mock()
+        process.wait.return_value = 1
+        service = mock.Mock()
+        service.launch.return_value = SimpleNamespace(
+            process=process, interface="tun0", mtu=1300,
+            machine={"name": "Management", "ip": "10.10.11.50"},
+        )
+        with (
+            mock.patch.object(handlers, "SpeedrunService", return_value=service),
+            mock.patch.object(handlers, "stop_openvpn") as stop,
+            redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(RuntimeError, "OpenVPN exited with code 1"),
+        ):
+            handlers.speedrun(self._args(), mock.Mock())
         stop.assert_called_once_with(process)
 
 

@@ -62,6 +62,8 @@ class SpeedrunService:
         try:
             with self.ui.step(f"resolve machine {target!r}"):
                 machine_id = self.machine.resolve_id(target)
+            with self.ui.step(f"check vpn server {server}"):
+                self.vpn.validate_server(server)
             with self.ui.step(f"switch vpn server {server}"):
                 self.vpn.switch(server)
             with self.ui.step("download ovpn config"):

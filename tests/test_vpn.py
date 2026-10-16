@@ -35,6 +35,34 @@ class OpenvpnPrivilegeTests(unittest.TestCase):
 
 
 class VpnFileAndProcessTests(unittest.TestCase):
+    def test_disabled_server_reports_recovery_and_preserves_config(self) -> None:
+        client = mock.Mock()
+        body = {"message": 'Generate Key failed: {"message": "The selected vpn_server is disabled."}'}
+        client.download.side_effect = ApiError(400, f"HTTP 400: {body['message']}", body)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "lab.ovpn"
+            output.write_bytes(b"keep")
+            with self.assertRaises(ApiError) as ctx:
+                VpnService(client).download_ovpn("267", 0, output)
+            self.assertEqual(b"keep", output.read_bytes())
+
+        self.assertEqual(400, ctx.exception.status)
+        self.assertIs(body, ctx.exception.body)
+        self.assertIn("VPN server 267 is disabled by HTB", str(ctx.exception))
+        self.assertIn("htb vpn servers release_arena", str(ctx.exception))
+        client.download.assert_called_once_with("/access/ovpnfile/267/0")
+
+    def test_other_download_errors_propagate_unchanged(self) -> None:
+        client = mock.Mock()
+        error = ApiError(503, "HTTP 503: Service unavailable")
+        client.download.side_effect = error
+
+        with self.assertRaises(ApiError) as ctx:
+            VpnService(client).download_ovpn("267", 0, Path("lab.ovpn"))
+
+        self.assertIs(error, ctx.exception)
+
     def test_download_writes_private_config(self) -> None:
         client = mock.Mock()
         client.download.return_value = b"client\n"
@@ -87,6 +115,7 @@ class VpnFileAndProcessTests(unittest.TestCase):
 
     def test_connect_wraps_missing_openvpn_command(self) -> None:
         service = VpnService(mock.Mock())
+        service.validate_server = mock.Mock()
         service.switch = mock.Mock()
         service.download_ovpn = mock.Mock(return_value=Path("lab.ovpn"))
 
@@ -102,6 +131,7 @@ class VpnFileAndProcessTests(unittest.TestCase):
 
     def test_connect_returns_openvpn_exit_code(self) -> None:
         service = VpnService(mock.Mock())
+        service.validate_server = mock.Mock()
         service.switch = mock.Mock()
         service.download_ovpn = mock.Mock(return_value=Path("lab.ovpn"))
 
@@ -287,6 +317,48 @@ class ResolveServerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Could not query HTB VPN servers"):
             service.resolve_server("US Machines VIP+ 1")
+
+
+class ValidateServerTests(unittest.TestCase):
+    def test_accepts_selectable_server(self):
+        client = mock.Mock()
+        client.get.return_value = ServerRowsTests()._payload()
+        self.assertEqual(265, VpnService(client).validate_server("265"))
+        client.post.assert_not_called()
+
+    def test_rejects_stale_assignment_without_switching(self):
+        client = mock.Mock()
+        client.get.return_value = {
+            "data": {"assigned": {"id": 267, "friendly_name": "EU Release 1"}, "options": {}}
+        }
+        with self.assertRaisesRegex(RuntimeError, "267 is not available"):
+            VpnService(client).validate_server("267")
+        client.post.assert_not_called()
+
+    def test_outage_is_not_reported_as_unavailable_server(self):
+        client = mock.Mock()
+        client.get.side_effect = ApiError(503, "Service unavailable")
+        with self.assertRaisesRegex(RuntimeError, "Could not verify availability"):
+            VpnService(client).validate_server("267")
+
+    def test_malformed_options_fail_closed(self):
+        client = mock.Mock()
+        client.get.return_value = {"data": {}}
+        with self.assertRaisesRegex(RuntimeError, "Could not read live VPN server options"):
+            VpnService(client).validate_server("267")
+
+    def test_connect_does_not_switch_or_download_unavailable_server(self):
+        service = VpnService(mock.Mock())
+        service.validate_server = mock.Mock(side_effect=RuntimeError("unavailable"))
+        service.switch = mock.Mock()
+        service.download_ovpn = mock.Mock()
+        with (
+            mock.patch("htb_terminal.services.vpn.ensure_openvpn_privileges"),
+            self.assertRaisesRegex(RuntimeError, "unavailable"),
+        ):
+            service.connect("267", 0, Path("lab.ovpn"), ["openvpn"])
+        service.switch.assert_not_called()
+        service.download_ovpn.assert_not_called()
 
 
 if __name__ == "__main__":
