@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 _DIFFICULTY = {
+    "very easy": "green",
     "easy": "green",
     "medium": "yellow",
     "hard": "red",

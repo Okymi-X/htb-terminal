@@ -5,12 +5,16 @@ import re
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from htb_terminal import __version__
+
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+_CHUNK_SIZE = 64 * 1024
 
 
 class ApiError(RuntimeError):
@@ -53,6 +57,69 @@ class HtbApiClient:
         self, path: str, query: dict[str, Any] | None = None, *, version: str | None = None
     ) -> bytes:
         return self.request("GET", path, query=query, version=version).body
+
+    def presigned_location(
+        self, path: str, query: dict[str, Any] | None = None, *, version: str | None = None
+    ) -> str:
+        """Return the ``Location`` of an endpoint that answers with a redirect.
+
+        HTB serves challenge files as a 302 to a presigned S3 URL, so the
+        redirect has to be read rather than followed: S3 rejects a request that
+        carries both its own signature and our ``Authorization`` header.
+        """
+        url = self._url(path, query, version)
+        request = Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+                "User-Agent": f"htb-terminal/{__version__}",
+            },
+            method="GET",
+        )
+        try:
+            response = _open_without_redirects(request, self.timeout)
+        except HTTPError as exc:
+            body = exc.read()
+            if exc.code not in _REDIRECT_STATUSES:
+                raise ApiError(exc.code, _error_message(exc.code, _parse_error_body(body), body)) from exc
+            location = exc.headers.get("Location") if exc.headers else None
+        else:
+            with response:
+                location = response.headers.get("Location")
+        if not location:
+            raise ApiError(None, "The API did not return a download redirect.")
+        return location
+
+    def fetch_to_file(self, url: str, destination: Path) -> int:
+        """Download ``url`` to ``destination`` and return the number of bytes.
+
+        Deliberately sends no ``Authorization`` header: the URL is already
+        presigned, and S3 answers HTTP 400 ``InvalidArgument`` ("Only one auth
+        mechanism allowed") when our bearer token rides along.
+        """
+        request = Request(url, headers={"User-Agent": f"htb-terminal/{__version__}"})
+        total = 0
+        try:
+            with urlopen(request, timeout=self.timeout) as response, destination.open("wb") as handle:
+                while chunk := response.read(_CHUNK_SIZE):
+                    handle.write(chunk)
+                    total += len(chunk)
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            # Do not leave a truncated archive behind: a half-written zip looks
+            # like a real download and fails later in a more confusing way.
+            try:
+                destination.unlink()
+            except OSError:
+                pass
+            if isinstance(exc, HTTPError):
+                raise ApiError(exc.code, f"HTTP {exc.code} while downloading the file") from exc
+            if isinstance(exc, URLError):
+                raise ApiError(None, f"Network error while downloading the file: {exc.reason}") from exc
+            if isinstance(exc, TimeoutError):
+                raise ApiError(None, f"Download timed out after {self.timeout}s") from exc
+            raise ApiError(None, f"Could not write {destination}: {exc}") from exc
+        return total
 
     def request_json(
         self,
@@ -139,6 +206,23 @@ class HtbApiClient:
         if not version:
             return self.base_url
         return re.sub(r"/api/v\d+$", f"/api/{version}", self.base_url)
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Turn a redirect into an ``HTTPError`` so the ``Location`` can be read."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
+
+
+def _open_without_redirects(request: Request, timeout: int):
+    """Open a request without following redirects.
+
+    Isolated so tests can substitute it without patching ``urlopen`` (which the
+    rest of the client uses for ordinary JSON calls).
+    """
+    opener = build_opener(_NoRedirectHandler)
+    return opener.open(request, timeout=timeout)
 
 
 def _retry_after_seconds(headers: Any) -> float | None:
