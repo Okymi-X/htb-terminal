@@ -13,6 +13,12 @@ from typing import Any
 
 from htb_terminal import __version__, handlers
 from htb_terminal.helpfmt import HtbHelpFormatter, banner
+from htb_terminal.services.challenges import (
+    DEFAULT_ARCHIVE_PASSWORD,
+    DIFFICULTIES,
+    STATES,
+)
+from htb_terminal.services.payloads import difficulty_slug
 from htb_terminal.services.vpn import VPN_PRODUCTS
 
 _SubParsers = argparse._SubParsersAction
@@ -40,6 +46,35 @@ def _non_negative_int(value: str) -> int:
 
 def _vpn_servers_needs_auth(args: argparse.Namespace) -> bool:
     return not args.static
+
+
+def _difficulty(value: str) -> str:
+    slug = difficulty_slug(value)
+    if slug not in DIFFICULTIES:
+        raise argparse.ArgumentTypeError(
+            f"unknown difficulty {value!r}; choose one of {', '.join(DIFFICULTIES)}"
+        )
+    return slug
+
+
+def _add_owned_filters(parser: argparse.ArgumentParser) -> None:
+    """``--owned`` / ``--unowned`` as one tri-state option (None = both)."""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--owned",
+        dest="owned",
+        action="store_const",
+        const=True,
+        help="Only entries you already own.",
+    )
+    group.add_argument(
+        "--unowned",
+        dest="owned",
+        action="store_const",
+        const=False,
+        help="Only entries you have not solved yet.",
+    )
+    parser.set_defaults(owned=None)
 
 
 def _add_global_arguments(parser: argparse.ArgumentParser, *, inherited: bool) -> None:
@@ -106,6 +141,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     _add_init_command(subparsers, common)
     _add_machine_commands(subparsers, common)
+    _add_challenge_commands(subparsers, common)
+    _add_sherlock_commands(subparsers, common)
     _add_vpn_commands(subparsers, common)
     _add_user_commands(subparsers, common)
     _add_speedrun_command(subparsers, common)
@@ -243,6 +280,200 @@ def _add_machine_commands(subparsers: _SubParsers, common: argparse.ArgumentPars
         required=True,
     )
     submit.set_defaults(handler=handlers.machine_submit)
+
+
+def _add_challenge_commands(subparsers: _SubParsers, common: argparse.ArgumentParser) -> None:
+    challenge = subparsers.add_parser(
+        "challenge",
+        help="List, inspect, download, run, and flag challenges.",
+        description="Challenges are separate from machines: they are listed and"
+        " paginated here, their files come as a zip, and a container challenge needs"
+        " a started instance before its ports answer.",
+    )
+    challenge_sub = challenge.add_subparsers(dest="challenge_command")
+
+    list_cmd = _leaf(
+        challenge_sub,
+        "list",
+        common,
+        help="List challenges with paging, filters, and a cached fallback.",
+    )
+    list_cmd.add_argument("--state", choices=list(STATES), default=None)
+    list_cmd.add_argument(
+        "--difficulty",
+        type=_difficulty,
+        default=None,
+        metavar="{very-easy,easy,medium,hard,insane}",
+        help="Filter by difficulty. 'very easy' and 'very_easy' are accepted too.",
+    )
+    list_cmd.add_argument(
+        "--category",
+        default=None,
+        help="Category name, such as Web, Reversing, Crypto, or Forensics.",
+    )
+    _add_owned_filters(list_cmd)
+    list_cmd.add_argument(
+        "--search",
+        default=None,
+        help="Case-insensitive substring match on the name, or an exact id.",
+    )
+    list_cmd.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=20,
+        help="Maximum rows to print. Default 20.",
+    )
+    list_cmd.add_argument(
+        "--all",
+        action="store_true",
+        help="Print every match, ignoring --limit.",
+    )
+    list_cmd.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Refetch pages instead of serving them from the 5 minute page cache.",
+    )
+    list_cmd.set_defaults(handler=handlers.challenge_list)
+
+    info = _leaf(challenge_sub, "info", common, help="Show one challenge and its play state.")
+    info.add_argument("id", type=_positive_int)
+    info.set_defaults(handler=handlers.challenge_info)
+
+    download = _leaf(
+        challenge_sub,
+        "download",
+        common,
+        help="Download a challenge file (default challenges/ch<id>/ch<id>.zip).",
+    )
+    download.add_argument("id", type=_positive_int)
+    download.add_argument(
+        "-o",
+        "--out",
+        type=Path,
+        default=None,
+        help="Archive path, or a directory to drop ch<id>.zip into."
+        " Default challenges/ch<id>/ch<id>.zip.",
+    )
+    download.add_argument(
+        "--extract",
+        action="store_true",
+        help="Extract the archive after verifying it is a zip (needs the password).",
+    )
+    download.add_argument(
+        "--password",
+        default=DEFAULT_ARCHIVE_PASSWORD,
+        help=f"Archive password for --extract. Default {DEFAULT_ARCHIVE_PASSWORD}.",
+    )
+    download.set_defaults(handler=handlers.challenge_download)
+
+    start = _leaf(
+        challenge_sub,
+        "start",
+        common,
+        help="Start a container challenge and wait for its ip:port.",
+    )
+    start.add_argument("id", type=_positive_int)
+    start.add_argument(
+        "--force",
+        action="store_true",
+        help="Stop the tracked running container first. HTB silently kills it anyway.",
+    )
+    start.add_argument(
+        "--wait",
+        type=_positive_int,
+        default=180,
+        metavar="SECONDS",
+        help="How long to poll for play_info.status == ready. Default 180.",
+    )
+    start.add_argument(
+        "--interval",
+        type=_positive_int,
+        default=5,
+        metavar="SECONDS",
+        help="Poll interval while the container boots. Default 5.",
+    )
+    start.set_defaults(handler=handlers.challenge_start)
+
+    stop = _leaf(
+        challenge_sub,
+        "stop",
+        common,
+        help="Stop a container challenge. Defaults to the tracked running one.",
+    )
+    stop.add_argument("id", type=_positive_int, nargs="?")
+    stop.set_defaults(handler=handlers.challenge_stop)
+
+    status = _leaf(
+        challenge_sub,
+        "status",
+        common,
+        help="Show tracked challenge containers and their time to expiry.",
+    )
+    status.add_argument("id", type=_positive_int, nargs="?")
+    status.set_defaults(handler=handlers.challenge_status)
+
+    own = _leaf(challenge_sub, "own", common, help="Submit a challenge flag.")
+    own.add_argument("id", type=_positive_int)
+    own.add_argument("--flag", required=True, help="The flag value, for example HTB{...}.")
+    own.set_defaults(handler=handlers.challenge_own)
+
+
+def _add_sherlock_commands(subparsers: _SubParsers, common: argparse.ArgumentParser) -> None:
+    sherlock = subparsers.add_parser(
+        "sherlock",
+        help="List Sherlock DFIR challenges and answer their tasks.",
+        description="Sherlocks are task-based DFIR challenges. Tasks live on"
+        " /sherlocks/<id>/tasks, not in the list or info payload.",
+    )
+    sherlock_sub = sherlock.add_subparsers(dest="sherlock_command")
+
+    list_cmd = _leaf(sherlock_sub, "list", common, help="List Sherlocks with paging and filters.")
+    list_cmd.add_argument("--active", action="store_true", help="Only the active Sherlocks.")
+    list_cmd.add_argument(
+        "--difficulty",
+        type=_difficulty,
+        default=None,
+        metavar="{very-easy,easy,medium,hard,insane}",
+    )
+    _add_owned_filters(list_cmd)
+    list_cmd.add_argument(
+        "--search",
+        default=None,
+        help="Case-insensitive substring match on the name, or an exact id.",
+    )
+    list_cmd.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=20,
+        help="Maximum rows to print. Default 20.",
+    )
+    list_cmd.add_argument("--all", action="store_true", help="Print every match, ignoring --limit.")
+    list_cmd.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Refetch pages instead of serving them from the 5 minute page cache.",
+    )
+    list_cmd.set_defaults(handler=handlers.sherlock_list)
+
+    tasks = _leaf(sherlock_sub, "tasks", common, help="List a Sherlock's task ids and questions.")
+    tasks.add_argument("id", type=_positive_int)
+    tasks.add_argument("--hints", action="store_true", help="Include each task's hint (spoilers).")
+    tasks.set_defaults(handler=handlers.sherlock_tasks)
+
+    answer = _leaf(sherlock_sub, "answer", common, help="Answer one Sherlock task.")
+    answer.add_argument("id", type=_positive_int)
+    answer.add_argument("task_id", type=_positive_int)
+    answer.add_argument("answer", help="The graded answer string.")
+    answer.set_defaults(handler=handlers.sherlock_answer)
+
+    progress = _leaf(
+        sherlock_sub,
+        "progress",
+        common,
+        help="Show answered/total tasks and ownership for one Sherlock.",
+    )
+    progress.add_argument("id", type=_positive_int)
+    progress.set_defaults(handler=handlers.sherlock_progress)
 
 
 def _add_vpn_commands(subparsers: _SubParsers, common: argparse.ArgumentParser) -> None:
