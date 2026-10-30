@@ -22,6 +22,8 @@ COMMANDS: dict[str, list[str]] = {
         "extend",
         "submit",
     ],
+    "challenge": ["list", "info", "download", "start", "stop", "status", "own"],
+    "sherlock": ["list", "tasks", "answer", "progress"],
     "vpn": ["servers", "switch", "download", "connect"],
     "user": ["info"],
     "speedrun": [],

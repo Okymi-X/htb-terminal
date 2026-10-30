@@ -335,6 +335,272 @@ Endpoint: `POST /machine/own`
 
 ---
 
+## challenge
+
+Challenges live on their own endpoints, separate from machines:
+
+- `GET /api/v4/challenges` is a paginator. `htb` walks it with `per_page=100`
+  and stops at the last page, at a repeated page, or when `--limit` is reached.
+- A challenge file is served as a `302` to a presigned S3 URL, so the archive
+  download sends the bearer token for the API hop and **no** `Authorization`
+  header for the storage hop. S3 answers `400 InvalidArgument` ("Only one auth
+  mechanism allowed") if the token rides along.
+- A container challenge needs a started instance before its ports answer.
+
+List pages are cached for five minutes under
+`~/.config/htb-terminal/cache/`. When the API answers HTTP 429 after the client
+has exhausted its backoff (1s, 2s, 4s, 8s, honoring `Retry-After`), the cached
+page is served with a warning instead of the command failing. Pass `--no-cache`
+to refetch.
+
+### challenge list
+
+```bash
+htb challenge list
+htb challenge list --state active --difficulty easy --limit 5
+htb challenge list --state active --limit 5
+htb challenge list --difficulty very-easy --category Web
+htb challenge list --unowned --difficulty medium --search crypto --limit 10
+htb --json challenge list --state active --all
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--state {active,retired,retired_free}` | all | Sent to the API as the `state` filter. |
+| `--difficulty {very-easy,easy,medium,hard,insane}` | all | Sent to the API as the `difficulty[]` filter. `very easy` and `very_easy` are normalized, so quoting "very easy" works. |
+| `--category NAME` | all | Category name such as `Web`, `Reversing`, `Crypto`, `Forensics`, `Pwn`. Matched case-insensitively. The endpoint has no category-name parameter, so this is applied locally. |
+| `--owned` / `--unowned` | both | Filter on `is_owned` (the field the API returns). Applied locally. |
+| `--search TEXT` | — | Case-insensitive substring match on the name, or an exact id. Applied locally. |
+| `--limit N` | `20` | Maximum rows to print. Paging stops as soon as the limit is met. |
+| `--all` | off | Print every match, ignoring `--limit`. |
+| `--no-cache` | off | Refetch pages instead of serving the five-minute page cache. |
+
+Filtering that the API does not support runs locally, and if the API ever
+rejects the server-side filters (HTTP 400/422), the command warns and filters
+everything locally rather than failing.
+
+Columns: `id`, `name`, `category`, `difficulty`, `state`, `solves`, `owned`.
+
+`--json` prints a machine-readable envelope, not a bare list:
+
+```json
+{
+  "challenges": [{"id": 883, "name": "Broken Shell", "category": "Misc",
+                  "difficulty": "Easy", "state": "active", "solves": 1407,
+                  "owned": true, "rating": 4.8}],
+  "count": 1,
+  "meta": {"pages_scanned": 1, "cached_pages": 0, "truncated": false,
+           "page_cap_reached": false, "limit": 20}
+}
+```
+
+Endpoint: `GET /challenges?page=N&per_page=100[&state=...][&difficulty[]=...]`
+
+### challenge info
+
+```bash
+htb challenge info 883
+htb --json challenge info 883
+```
+
+The summary shows the name, category, difficulty, state, points, solves,
+`play_methods`, the challenge file (name and size), `play_info` (`status`, `ip`,
+`ports`, `expires_at`, `expires_in`), and the description. A container
+challenge with nothing running reports `play_info: status not running` instead
+of hiding the block. `--json` prints the raw `/challenge/info/<id>` payload.
+
+Endpoint: `GET /challenge/info/<id>`
+
+### challenge download
+
+```bash
+htb challenge download 806
+htb challenge download 806 --extract
+htb challenge download 806 -o /tmp/ch806.zip --extract
+htb challenge download 806 -o downloads/          # -> downloads/ch806.zip
+htb challenge download 806 --extract --password hacktheblue
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-o, --out PATH` | `challenges/ch<id>/ch<id>.zip` | Archive path, or a directory (an existing directory or a path without a suffix) to drop `ch<id>.zip` into. |
+| `--extract` | off | Extract next to the archive, after verifying the file is a zip. |
+| `--password VALUE` | `hackthebox` | Archive password used by `--extract`. |
+
+The archive is validated with a zip check before extraction, and members that
+would escape the destination directory are rejected. A wrong password is
+reported with a pointer to `--password`.
+
+The download flow is: `GET /challenge/download/<id>` → read the `302`
+`Location` without following it → `GET` that presigned URL **without** the
+bearer token → save. Results are printed as `output`, `size`, `size_human`,
+and, with `--extract`, `extracted_to` and `files`.
+
+### challenge start
+
+```bash
+htb challenge start 883
+htb challenge start 883 --wait 300 --interval 5
+htb challenge start 1520 --force
+```
+
+`start` posts `POST /container/start` with `{"challenge_id": id}`, then polls
+`GET /challenge/info/<id>` until `play_info.status == "ready"` and an IP is
+assigned. That field is null for the first 30-90 seconds, so the poll is
+expected; progress goes to stderr. When ready, it prints `status`, `ip`,
+`ports`, `expires_at`, `expires_in`, and the server message.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--wait SECONDS` | `180` | How long to poll for a ready container. |
+| `--interval SECONDS` | `5` | Poll interval while the container boots. |
+| `--force` | off | Stop the tracked running container first, then start this one. |
+
+#### Single container rule
+
+**HTB allows one challenge container per account, and starting a second one
+silently kills the first** — there is no error, the existing `host:port` just
+stops accepting connections. Because the API cannot list running containers,
+`htb` tracks what it started in
+`~/.config/htb-terminal/containers.json` (mode `0600`):
+
+- `challenge start` refuses while another challenge is tracked as running, and
+  names it, so a live instance is never orphaned by accident.
+- `--force` stops the tracked container first (freeing the slot), then starts
+  the new one.
+- Tracked entries expire on their own: once `expires_at` has passed, the entry
+  no longer blocks a start, so a crashed session does not wedge the CLI.
+
+Endpoints: `POST /container/start`, `POST /container/stop`
+
+### challenge stop
+
+```bash
+htb challenge stop 883
+htb challenge stop          # the tracked running container
+```
+
+Posts `POST /container/stop` with `{"challenge_id": id}` and clears the tracked
+entry.
+
+### challenge status
+
+```bash
+htb challenge status
+htb challenge status 883
+htb --json challenge status
+```
+
+Lists tracked containers with their live `status`, `ip`, `ports`, and time to
+expiry (`in 2h 59m`, or `expired`). Each row is refreshed from
+`GET /challenge/info/<id>` when the API answers, and falls back to the tracked
+values when it does not.
+
+| Column | Description |
+| --- | --- |
+| `id` | Challenge id. |
+| `name` | Challenge name, when the API answered. |
+| `status` | `play_info.status` (`ready`, `deploying`, ...). |
+| `ip` | Instance IP. |
+| `ports_text` | Comma-separated ports (also available as a `ports` list in `--json`). |
+| `expires` | Time to expiry, relative to now. |
+
+`--json` prints `{"containers": [{"id": ..., "ports": [...], "expires": "in 2h 59m", "tracked": true, ...}]}`.
+
+### challenge own
+
+```bash
+htb challenge own 883 --flag 'HTB{...}'
+htb --json challenge own 883 --flag 'HTB{...}'
+```
+
+Posts `POST /challenge/own` with `{"challenge_id": id, "flag": flag}` and prints
+the server message. `Congratulations!` means it counted; a rejection such as
+`Incorrect flag` is printed to stderr as `error: ...` and the command exits
+non-zero (1), so scripts can branch on the exit code.
+
+---
+
+## sherlock
+
+Sherlocks are the task-based DFIR challenges. Each one has numbered tasks that
+are answered with graded strings. The list and info payloads do not carry the
+tasks — they come from `GET /sherlocks/<id>/tasks` — and progress is a separate
+call.
+
+### sherlock list
+
+```bash
+htb sherlock list
+htb sherlock list --active --limit 10
+htb sherlock list --difficulty easy --unowned
+htb --json sherlock list --active
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--active` | off | Only the active Sherlocks (sent as `state=active`). |
+| `--difficulty {very-easy,easy,medium,hard,insane}` | all | Sent to the API as the `difficulty[]` filter. |
+| `--owned` / `--unowned` | both | Filter on `is_owned`. Applied locally. |
+| `--search TEXT` | — | Name substring or exact id. Applied locally. |
+| `--limit N` | `20` | Maximum rows to print. |
+| `--all` | off | Print every match, ignoring `--limit`. |
+| `--no-cache` | off | Refetch pages instead of using the five-minute page cache. |
+
+Columns: `id`, `name`, `difficulty`, `state`, `solves`, `owned`, `progress`.
+
+`--json` prints `{"sherlocks": [...], "count": N, "meta": {...}}` with the same
+`meta` keys as `challenge list`.
+
+Endpoint: `GET /sherlocks?page=N&per_page=100[&state=...][&difficulty[]=...]`
+
+### sherlock tasks
+
+```bash
+htb sherlock tasks 631
+htb sherlock tasks 631 --hints
+htb --json sherlock tasks 631
+```
+
+Lists each task's `id`, `title`, `question` (`description`), `answer_format`
+(`masked_flag`), `completed`, and `prerequisite_id`. Hints are excluded by
+default; `--hints` adds them. If the API returns no tasks for the id, the
+command says so explicitly rather than inventing fields.
+
+`--json` prints `{"sherlock_id": 631, "count": 8, "tasks": [...]}`.
+
+Endpoint: `GET /sherlocks/<id>/tasks`
+
+### sherlock answer
+
+```bash
+htb sherlock answer 631 2880 '10.0.0.5'
+htb --json sherlock answer 631 2880 '10.0.0.5'
+```
+
+Posts `POST /sherlocks/<id>/tasks/<task_id>/flag` with `{"flag": answer}`.
+The outcomes are surfaced distinctly:
+
+| Result | Output | Exit code |
+| --- | --- | --- |
+| `200` / `201` | The server message (accepted). | `0` |
+| `400` | `error: Wrong answer for task <id>: ...` | `1` |
+| `403` | `error: Task <id> is locked or not available ...` plus the prerequisite hint. | `1` |
+| `404` | `error: Sherlock <id> has no task <task_id>` plus the `htb sherlock tasks <id>` hint. | `1` |
+
+### sherlock progress
+
+```bash
+htb sherlock progress 631
+htb --json sherlock progress 631
+```
+
+Shows `answered`, `total`, `progress` (percentage), `owned`, and `own_rank`.
+
+Endpoint: `GET /sherlocks/<id>/progress`
+
+---
+
 ## vpn
 
 VPN commands accept a server target as a numeric id, a known alias, or a

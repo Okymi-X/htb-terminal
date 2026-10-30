@@ -29,8 +29,14 @@ from htb_terminal.output import (
     print_status_line,
     print_table,
 )
+from htb_terminal.services.challenges import (
+    ChallengeFilters,
+    ChallengeService,
+    challenge_summary,
+)
 from htb_terminal.services.machines import MachineService
 from htb_terminal.services.payloads import machine_rows
+from htb_terminal.services.sherlocks import SherlockFilters, SherlockService
 from htb_terminal.services.speedrun import SpeedrunService
 from htb_terminal.services.user import UserService
 from htb_terminal.services.vpn import VpnService, server_rows, vpn_rows
@@ -39,6 +45,14 @@ from htb_terminal.ui import StepRunner
 
 def _machine_service(client: HtbApiClient) -> MachineService:
     return MachineService(client)
+
+
+def _challenge_service(client: HtbApiClient) -> ChallengeService:
+    return ChallengeService(client)
+
+
+def _sherlock_service(client: HtbApiClient) -> SherlockService:
+    return SherlockService(client)
 
 
 def _vpn_service(client: HtbApiClient) -> VpnService:
@@ -180,6 +194,159 @@ def machine_extend(args: argparse.Namespace, client: HtbApiClient) -> Any:
 
 def machine_submit(args: argparse.Namespace, client: HtbApiClient) -> Any:
     return _machine_service(client).submit_flag(args.target, args.flag, args.difficulty)
+
+
+def challenge_list(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    filters = ChallengeFilters(
+        state=args.state,
+        difficulty=args.difficulty,
+        category=args.category,
+        owned=args.owned,
+        search=args.search,
+    )
+    result = _challenge_service(client).list(
+        filters,
+        limit=None if args.all else args.limit,
+        use_cache=not args.no_cache,
+    )
+    if args.json:
+        return result
+
+    print_table(
+        result["challenges"],
+        ["id", "name", "category", "difficulty", "state", "solves", "owned"],
+        color=args.color,
+        wide=args.wide,
+    )
+    _report_list_meta("challenges", result)
+    return None
+
+
+def challenge_info(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    # One request either way: --json returns the raw payload, the table view is
+    # the same payload reshaped.
+    payload = _challenge_service(client).info_raw(args.id)
+    if args.json:
+        return payload
+    return challenge_summary(payload["challenge"])
+
+
+def challenge_download(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    return _challenge_service(client).download(
+        args.id,
+        out=args.out,
+        extract=args.extract,
+        password=args.password,
+    )
+
+
+def challenge_start(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    return _challenge_service(client).start(
+        args.id,
+        force=args.force,
+        wait=args.wait,
+        interval=args.interval,
+    )
+
+
+def challenge_stop(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    return _challenge_service(client).stop(args.id)
+
+
+def challenge_status(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    result = _challenge_service(client).status(args.id)
+    if args.json:
+        return result
+    print_table(
+        result["containers"],
+        ["id", "name", "status", "ip", "ports_text", "expires"],
+        color=args.color,
+        wide=args.wide,
+    )
+    return None
+
+
+def challenge_own(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    return _challenge_service(client).own(args.id, args.flag)
+
+
+def sherlock_list(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    filters = SherlockFilters(
+        state="active" if args.active else None,
+        difficulty=args.difficulty,
+        owned=args.owned,
+        search=args.search,
+    )
+    result = _sherlock_service(client).list(
+        filters,
+        limit=None if args.all else args.limit,
+        use_cache=not args.no_cache,
+    )
+    if args.json:
+        return result
+
+    print_table(
+        result["sherlocks"],
+        ["id", "name", "difficulty", "state", "solves", "owned", "progress"],
+        color=args.color,
+        wide=args.wide,
+    )
+    _report_list_meta("sherlocks", result)
+    return None
+
+
+def sherlock_tasks(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    result = _sherlock_service(client).tasks(args.id, include_hints=args.hints)
+    if args.json:
+        return result
+    for task in result["tasks"]:
+        print(f"{task['id']}  {task.get('title') or ''}".rstrip())
+        if task.get("question"):
+            print(f"    {task['question']}")
+        details = []
+        if task.get("answer_format"):
+            details.append(f"format: {task['answer_format']}")
+        if task.get("completed"):
+            details.append("solved")
+        if task.get("prerequisite_id"):
+            details.append(f"needs task {task['prerequisite_id']} first")
+        if task.get("hint"):
+            details.append(f"hint: {task['hint']}")
+        if details:
+            print(f"    {' | '.join(details)}")
+    return None
+
+
+def sherlock_answer(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    return _sherlock_service(client).answer(args.id, args.task_id, args.answer)
+
+
+def sherlock_progress(args: argparse.Namespace, client: HtbApiClient) -> Any:
+    return _sherlock_service(client).progress(args.id)
+
+
+def _report_list_meta(label: str, result: dict[str, Any]) -> None:
+    """Explain shortened listings on stderr so stdout stays table-only."""
+    meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+    count = result.get("count")
+    if meta.get("truncated"):
+        print(
+            f"note: showing {count} {label} (--limit {meta.get('limit')});"
+            " raise --limit or pass --all for every match.",
+            file=sys.stderr,
+        )
+    if meta.get("page_cap_reached"):
+        print(
+            f"warning: stopped after {meta.get('pages_scanned')} pages;"
+            " results may be incomplete. Narrow the filters.",
+            file=sys.stderr,
+        )
+    cached = meta.get("cached_pages") or 0
+    if cached and cached == meta.get("pages_scanned"):
+        print(
+            "note: served from the page cache (5 minute TTL); pass --no-cache to refetch.",
+            file=sys.stderr,
+        )
 
 
 def vpn_servers(args: argparse.Namespace, client: HtbApiClient) -> Any:
