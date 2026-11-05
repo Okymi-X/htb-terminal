@@ -122,7 +122,7 @@ class LabCliTests(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(cli, "build_client") if hasattr(cli, "build_client") else mock.patch(
             "htb_terminal.cli.HtbApiClient", lambda *a, **k: StubClient(payloads)
-        ):
+        ), mock.patch.dict("os.environ", {"HTB_API_TOKEN": "dummy-token"}):
             with redirect_stdout(out):
                 cli.main(argv)
         return out.getvalue()
@@ -142,7 +142,10 @@ class LabCliTests(unittest.TestCase):
 
     def test_api_error_is_surfaced_not_swallowed(self) -> None:
         client = StubClient({}, error=ApiError(404, "HTTP 404: not found"))
-        with mock.patch("htb_terminal.cli.HtbApiClient", lambda *a, **k: client):
+        with (
+            mock.patch("htb_terminal.cli.HtbApiClient", lambda *a, **k: client),
+            mock.patch.dict("os.environ", {"HTB_API_TOKEN": "dummy-token"}),
+        ):
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as errors:
                 code = cli.main(["prolab", "list", "--color", "never"])
 
