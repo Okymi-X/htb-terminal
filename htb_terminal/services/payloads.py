@@ -87,6 +87,11 @@ def text(value: Any) -> str:
     return str(value).casefold()
 
 
+def difficulty_slug(value: Any) -> str:
+    """Normalize a difficulty for comparison: ``Very Easy`` -> ``very-easy``."""
+    return "-".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+
+
 def to_int(value: Any) -> int | None:
     try:
         return int(value)

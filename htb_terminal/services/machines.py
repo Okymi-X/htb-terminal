@@ -92,6 +92,41 @@ class MachineService:
     def list_playable(self, page: int | None = None) -> Any:
         return self.client.get("/machine/paginated", query={"page": page})
 
+    def activity(self, target: str) -> list[dict[str, Any]]:
+        """Recent activity (owns, bloods) for one machine."""
+        payload = self.client.get(f"/machine/activity/{target}")
+        info = payload.get("info") if isinstance(payload, dict) else None
+        items = (info or {}).get("activity") or []
+        return [
+            {
+                "date": item.get("date_diff") or item.get("date"),
+                "user": item.get("user_name")
+                or ((item.get("user") or {}).get("name") if isinstance(item.get("user"), dict) else None),
+                "type": item.get("type") or item.get("own_type"),
+                "blood": item.get("blood_type"),
+            }
+            for item in items
+            if isinstance(item, dict)
+        ]
+
+    def walkthroughs(self, target: str) -> list[dict[str, Any]]:
+        """Official/community walkthroughs; HTB answers 400 for a non-retired box."""
+        payload = self.client.get(f"/machine/walkthroughs/{target}")
+        items = payload.get("walkthroughs") or payload.get("data") or []
+        rows = []
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "language": item.get("language"),
+                    "url": item.get("url"),
+                }
+            )
+        return rows
+
     def list_retired(self, page: int | None = None) -> Any:
         return self.client.get("/machine/list/retired/paginated", query={"page": page})
 

@@ -5,7 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Python terminal client for selected HTB Labs API workflows (v4 and v5):
-machines, VPN, OVPN files, and raw API calls. Zero external dependencies.
+machines, challenges, Sherlocks, VPN, OVPN files, and raw API calls. Zero
+external dependencies.
 
 See the [command reference](docs/commands.md) for every command, option,
 default, and the API endpoint each command calls.
@@ -134,6 +135,18 @@ Full details for each command are in the [command reference](docs/commands.md).
 # Seasonal release: keep retrying a full spawn server, then wait for the IP.
 ./htb machine start Nimbus --mode auto --wait --retry-for 360 --interval 5
 
+./htb challenge list --state active --difficulty easy --limit 5
+./htb challenge info 883
+./htb challenge download 806 --extract
+./htb challenge start 883
+./htb challenge status
+./htb challenge stop 883
+
+./htb sherlock list --active --limit 5
+./htb sherlock tasks 631
+./htb sherlock answer 631 2880 '10.0.0.5'
+./htb sherlock progress 631
+
 ./htb machine stop
 ./htb machine reset
 ./htb machine extend
@@ -241,6 +254,62 @@ command inspects what is active and reacts automatically:
 For the full hands-off flow that also connects the VPN and tunes the MTU,
 use `speedrun` below.
 
+## Challenges and Sherlocks
+
+Challenges and Sherlocks are their own command groups. Both list endpoints are
+paginated and rate limited, so `htb` walks the pages itself, sends the filters
+the API understands (`state`, `difficulty[]`), applies the rest locally, and
+caches pages for five minutes. When the API still answers HTTP 429 after the
+backoff retries, the cached page is served with a warning instead of a failure;
+`--no-cache` forces a refetch.
+
+```bash
+./htb challenge list --state active --difficulty easy --limit 5
+./htb challenge list --unowned --difficulty medium --search crypto --limit 10
+./htb --json challenge list --state active --all
+
+./htb challenge info 883
+./htb challenge download 806 --extract   # challenges/ch806/ch806.zip
+./htb challenge start 883
+./htb challenge status
+./htb challenge stop 883
+./htb challenge own 883 --flag 'HTB{...}'
+
+./htb sherlock list --active --limit 5
+./htb sherlock tasks 631
+./htb sherlock answer 631 2880 '10.0.0.5'
+./htb sherlock progress 631
+```
+
+A challenge file is downloaded in two hops: the API answers `302` to a
+presigned S3 URL, and the storage request is sent **without** the bearer token,
+because S3 rejects a second auth mechanism with `400 InvalidArgument`. Only
+`https` download URLs are accepted. The archive is validated as a zip before
+`--extract` runs, which also rejects path-traversal members and archives that
+would expand beyond 4 GiB. The password defaults to
+the archive word HTB publishes on the challenge page; override it with
+`--password` when a challenge uses a different one.
+
+`challenge own` prints the server message and exits `1` on a rejection, so it
+works in a script. `sherlock answer` distinguishes an accepted answer (`0`) from
+a wrong one (`400`, exit `1`), a locked task (`403`, exit `1`), and an unknown
+task id (`404`, exit `1`).
+
+### One container at a time
+
+HTB allows a single challenge container per account, and starting a second one
+silently kills the first -- the old `host:port` simply stops answering. The API
+cannot list running containers, so `htb` tracks the one it started in
+`~/.config/htb-terminal/containers.json`:
+
+- `challenge start` refuses while another challenge is tracked as running, and
+  names it, so a live instance is never orphaned by accident.
+- `--force` stops the tracked instance first, then starts the new one.
+- Tracked entries stop blocking once their `expires_at` has passed, so a crashed
+  session does not wedge the CLI.
+- `challenge status` reports each tracked instance with its live status, IP,
+  ports, and time to expiry.
+
 ## Speedrun a season release
 
 When a seasonal machine drops (Saturdays 19:00 UTC), the slow part is the manual
@@ -326,6 +395,12 @@ eval "$(htb completion zsh)"
 - `htb_terminal/timefmt.py`: relative time formatting for display.
 - `htb_terminal/completion.py`: bash/zsh completion scripts from one command map.
 - `htb_terminal/services/machines.py`: `MachineService` — machine API operations.
+- `htb_terminal/services/challenges.py`: `ChallengeService` — challenge list, info,
+  download, containers, and flags.
+- `htb_terminal/services/sherlocks.py`: `SherlockService` — Sherlock list, tasks,
+  answers, and progress.
+- `htb_terminal/services/paging.py`: page walking and the on-disk page cache.
+- `htb_terminal/containers.py`: single-slot container tracking for challenges.
 - `htb_terminal/services/user.py`: `UserService` — current-user profile.
 - `htb_terminal/services/speedrun.py`: `SpeedrunService` — season-release flow.
 - `htb_terminal/services/payloads.py`: pure helpers that reshape machine-list JSON.

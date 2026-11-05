@@ -149,6 +149,15 @@ def _preferred_column_width(column: str, terminal_width: int) -> int:
         "retired": 7,
         "scope": 10,
         "location": 10,
+        "category": 12,
+        "state": 12,
+        "solves": 7,
+        "owned": 6,
+        "progress": 9,
+        "status": 9,
+        "ip": 16,
+        "ports_text": 16,
+        "expires": 10,
     }
     return min(defaults.get(column, 24), max(8, terminal_width // 3))
 
