@@ -529,11 +529,17 @@ def extract_archive(archive_path: Path, password: str) -> dict[str, Any]:
     destination = archive_path.parent / archive_path.stem
     try:
         with zipfile.ZipFile(archive_path) as archive:
+            # Guards raise plain RuntimeError, which must not be mistaken for
+            # the wrong-password case handled below.
             _guard_member_paths(archive, destination)
-            archive.extractall(destination, pwd=password.encode("utf-8"))
+            _guard_total_size(archive)
+            try:
+                archive.extractall(destination, pwd=password.encode("utf-8"))
+            except RuntimeError as exc:
+                # zipfile signals a wrong password with a bare RuntimeError.
+                raise _WrongPassword(str(exc)) from exc
             members = [name for name in archive.namelist() if not name.endswith("/")]
-    except RuntimeError as exc:
-        # zipfile signals a wrong password with a bare RuntimeError.
+    except _WrongPassword as exc:
         raise RuntimeError(
             f"Could not extract {archive_path}: {exc}. The archive password is not"
             f" {password!r}; retry with --password."
@@ -541,6 +547,22 @@ def extract_archive(archive_path: Path, password: str) -> dict[str, Any]:
     except zipfile.BadZipFile as exc:
         raise RuntimeError(f"{archive_path} is not a readable zip archive: {exc}") from exc
     return {"extracted_to": str(destination), "files": len(members)}
+
+
+class _WrongPassword(Exception):
+    pass
+
+
+MAX_EXTRACTED_BYTES = 4 * 1024**3
+
+
+def _guard_total_size(archive: zipfile.ZipFile) -> None:
+    total = sum(member.file_size for member in archive.infolist())
+    if total > MAX_EXTRACTED_BYTES:
+        raise RuntimeError(
+            f"archive would extract to {human_size(total)}, above the"
+            f" {human_size(MAX_EXTRACTED_BYTES)} safety limit; extract it manually if intended"
+        )
 
 
 def _guard_member_paths(archive: zipfile.ZipFile, destination: Path) -> None:

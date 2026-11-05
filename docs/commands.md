@@ -428,12 +428,14 @@ htb challenge download 806 --extract --password <word>
 | `--password VALUE` | HTB's published archive word | Archive password used by `--extract`. Recent challenges may use another word; it is printed on the challenge page. |
 
 The archive is validated with a zip check before extraction, and members that
-would escape the destination directory are rejected. A wrong password is
-reported with a pointer to `--password`.
+would escape the destination directory are rejected (this is reported as
+such, not as a password problem). Extraction is also refused when the archive
+would expand beyond 4 GiB. A wrong password is reported with a pointer to
+`--password`.
 
 The download flow is: `GET /challenge/download/<id>` → read the `302`
-`Location` without following it → `GET` that presigned URL **without** the
-bearer token → save. Results are printed as `output`, `size`, `size_human`,
+`Location` without following it (anything but an `https` URL is refused) →
+`GET` that presigned URL **without** the bearer token → save. Results are printed as `output`, `size`, `size_human`,
 and, with `--extract`, `extracted_to` and `files`.
 
 ### challenge start

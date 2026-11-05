@@ -8,13 +8,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from htb_terminal import __version__
 
 _REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 _CHUNK_SIZE = 64 * 1024
+
+
+def _require_https(url: str) -> None:
+    """Refuse non-HTTPS download URLs (urlopen would read file:// or ftp:// too)."""
+    scheme = urlsplit(url).scheme.lower()
+    if scheme != "https":
+        raise ApiError(None, f"Refusing to download from a non-HTTPS URL (scheme {scheme!r}).")
 
 
 class ApiError(RuntimeError):
@@ -89,6 +96,7 @@ class HtbApiClient:
                 location = response.headers.get("Location")
         if not location:
             raise ApiError(None, "The API did not return a download redirect.")
+        _require_https(location)
         return location
 
     def fetch_to_file(self, url: str, destination: Path) -> int:
@@ -98,6 +106,7 @@ class HtbApiClient:
         presigned, and S3 answers HTTP 400 ``InvalidArgument`` ("Only one auth
         mechanism allowed") when our bearer token rides along.
         """
+        _require_https(url)
         request = Request(url, headers={"User-Agent": f"htb-terminal/{__version__}"})
         total = 0
         try:

@@ -22,6 +22,7 @@ from htb_terminal.services.challenges import (
     challenge_row,
     challenge_summary,
     download_target,
+    extract_archive,
     human_size,
 )
 from htb_terminal.services.paging import PageCache
@@ -779,6 +780,47 @@ class ChallengeTableTests(TmpConfigMixin):
             handlers.challenge_list(args, mock.Mock())
 
         self.assertIn("--all", errors.getvalue())
+
+
+class DownloadHardeningTests(unittest.TestCase):
+    def test_non_https_redirect_is_refused(self) -> None:
+        client = HtbApiClient("https://example.test/api/v4", "token")
+        redirect = _http_error(302, headers={"Location": "file:///etc/passwd"})
+        with mock.patch("htb_terminal.http._open_without_redirects", side_effect=redirect):
+            with self.assertRaises(ApiError) as ctx:
+                client.presigned_location("/challenge/download/1")
+        self.assertIn("non-HTTPS", str(ctx.exception))
+
+    def test_fetch_to_file_refuses_non_https(self) -> None:
+        client = HtbApiClient("https://example.test/api/v4", "token")
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "x.zip"
+            for url in ("file:///etc/passwd", "http://storage.example.test/x.zip", "ftp://h/x"):
+                with self.assertRaises(ApiError):
+                    client.fetch_to_file(url, destination)
+            self.assertFalse(destination.exists())
+
+    def test_zip_slip_error_is_not_reported_as_wrong_password(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "evil.zip"
+            with zipfile.ZipFile(archive, "w") as handle:
+                handle.writestr("../../escaped.txt", "x")
+            with self.assertRaises(RuntimeError) as ctx:
+                extract_archive(archive, "hackthebox")
+            self.assertIn("escapes the destination", str(ctx.exception))
+            self.assertNotIn("password", str(ctx.exception))
+            self.assertFalse((Path(tmp).parent / "escaped.txt").exists())
+
+    def test_oversized_archive_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "big.zip"
+            with zipfile.ZipFile(archive, "w") as handle:
+                handle.writestr("a.txt", "x")
+            with mock.patch("htb_terminal.services.challenges.MAX_EXTRACTED_BYTES", 0):
+                with self.assertRaises(RuntimeError) as ctx:
+                    extract_archive(archive, "hackthebox")
+            self.assertIn("safety limit", str(ctx.exception))
+            self.assertFalse((Path(tmp) / "big").exists())
 
 
 if __name__ == "__main__":

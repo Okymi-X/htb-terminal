@@ -283,8 +283,10 @@ backoff retries, the cached page is served with a warning instead of a failure;
 
 A challenge file is downloaded in two hops: the API answers `302` to a
 presigned S3 URL, and the storage request is sent **without** the bearer token,
-because S3 rejects a second auth mechanism with `400 InvalidArgument`. The
-archive is validated as a zip before `--extract` runs. The password defaults to
+because S3 rejects a second auth mechanism with `400 InvalidArgument`. Only
+`https` download URLs are accepted. The archive is validated as a zip before
+`--extract` runs, which also rejects path-traversal members and archives that
+would expand beyond 4 GiB. The password defaults to
 the archive word HTB publishes on the challenge page; override it with
 `--password` when a challenge uses a different one.
 
